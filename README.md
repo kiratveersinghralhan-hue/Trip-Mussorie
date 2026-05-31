@@ -75,3 +75,7 @@ https://yourusername.github.io/repo-name/?trip=mussorie-boys-trip
 ```
 
 Any friend can also type the same trip code inside the app and tap **Join**.
+
+
+## Keyboard focus fix
+This version avoids rebuilding friend-name and budget input cards while someone is typing, so mobile keyboards stay open during edits.

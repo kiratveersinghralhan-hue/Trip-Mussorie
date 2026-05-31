@@ -16,7 +16,7 @@ const firebaseConfig = {
   measurementId: "G-J9NF5DH31T"
 };
 
-const APP_VERSION = "premium-firestore-nophotos-v2";
+const APP_VERSION = "premium-firestore-nophotos-v3-keyboardfix";
 const DEFAULT_TRIP_CODE = "mussorie-boys-trip";
 const LOCAL_TRIP_KEY = "mussoorie.trip.code.premium";
 const LOCAL_CACHE_KEY = "mussoorie.trip.cache.premium";
@@ -256,12 +256,13 @@ async function writeRemote(force = false) {
   }
 }
 
-function queueSave() {
-  render();
+function queueSave(options = {}) {
+  const shouldRender = options.render !== false;
+  if (shouldRender) render();
   saveCache();
   if (isApplyingRemote) return;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => writeRemote(), 420);
+  saveTimer = setTimeout(() => writeRemote(), options.delay ?? 420);
 }
 
 function setSyncStatus(text, mode) {
@@ -331,6 +332,10 @@ function renderSelects() {
 
 function renderFriends() {
   const container = $("#friendsList");
+  const active = document.activeElement;
+  const editingFriend = active && container.contains(active) && active.matches(".friend-name, .friend-budget");
+  if (editingFriend) return;
+
   container.innerHTML = state.friends.map((friend, index) => `
     <article class="friend-card" data-id="${escapeHtml(friend.id)}">
       <div class="avatar-row">
@@ -338,13 +343,13 @@ function renderFriends() {
         <div>
           <label>
             <span>Name</span>
-            <input class="friend-name" value="${escapeAttr(friend.name)}" aria-label="Friend name ${index + 1}" />
+            <input class="friend-name" value="${escapeAttr(friend.name)}" aria-label="Friend name ${index + 1}" autocomplete="off" />
           </label>
         </div>
       </div>
       <label>
         <span>Budget</span>
-        <input class="friend-budget" type="number" min="0" step="1" value="${Number(friend.budget || 0)}" aria-label="Budget for ${escapeAttr(friend.name)}" />
+        <input class="friend-budget" type="number" min="0" step="1" value="${Number(friend.budget || 0)}" aria-label="Budget for ${escapeAttr(friend.name)}" inputmode="numeric" />
       </label>
       <div class="friend-actions">
         <button class="tiny-btn delete remove-friend" type="button">Remove</button>
@@ -354,14 +359,29 @@ function renderFriends() {
 
   container.querySelectorAll(".friend-card").forEach((card) => {
     const friend = state.friends.find((item) => item.id === card.dataset.id);
-    card.querySelector(".friend-name").addEventListener("input", (event) => {
+    const nameInput = card.querySelector(".friend-name");
+    const budgetInput = card.querySelector(".friend-budget");
+
+    nameInput.addEventListener("input", (event) => {
       friend.name = event.target.value || "Friend";
-      queueSave();
+      card.querySelector(".avatar").textContent = initials(friend.name);
+      queueSave({ render: false, delay: 700 });
     });
-    card.querySelector(".friend-budget").addEventListener("input", (event) => {
+    nameInput.addEventListener("blur", () => {
+      friend.name = nameInput.value.trim() || "Friend";
+      queueSave({ delay: 120 });
+    });
+
+    budgetInput.addEventListener("input", (event) => {
       friend.budget = Number(event.target.value || 0);
-      queueSave();
+      renderMetrics();
+      queueSave({ render: false, delay: 700 });
     });
+    budgetInput.addEventListener("blur", () => {
+      friend.budget = Number(budgetInput.value || 0);
+      queueSave({ delay: 120 });
+    });
+
     card.querySelector(".remove-friend").addEventListener("click", () => removeFriend(friend.id));
   });
 }
