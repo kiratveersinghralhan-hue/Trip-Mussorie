@@ -1,23 +1,10 @@
-# Mussoorie Boys Trip — Live Budget & Orders
+# Mussoorie Boys Trip — Local TripSplit
 
-A GitHub Pages-ready static website for a boys trip to Mussoorie. It keeps all files in the main root folder with no subfolders.
-
-## Features
-
-- 7 friends already added by default
-- Add/remove friends
-- Change names and budgets
-- Add shared expenses
-- Choose who paid and who splits each expense
-- Restaurant order board for stops
-- Friends can add item names, quantity, and optional prices
-- Admin can enter the final restaurant bill total
-- Balances and settlement suggestions update automatically
-- Local live sync between browser tabs
-- Firebase Realtime Database support for true live syncing between friends
-- No build step, no npm, no backend folder
+A clean, premium-looking, GitHub Pages ready website for a boys trip to Mussoorie.
 
 ## Files
+
+Everything is in the main root folder. No subfolders.
 
 ```txt
 index.html
@@ -27,84 +14,48 @@ README.md
 .nojekyll
 ```
 
-## Run locally
+## Features
 
-Open `index.html` directly, or run a small local server:
+- Overview dashboard for budget, spending, remaining amount and average per person
+- 7 friends by default
+- Add or remove friends
+- Edit friend names and budgets instantly
+- Add quick expenses
+- Add detailed expenses with custom split members
+- Auto settlement: who should pay whom
+- Restaurant order board
+- Add item names by friend
+- Add final restaurant total and split among people who ordered
+- Upload bill photos
+- Attach bill photo while adding an expense
+- Local auto-save using browser storage
+- Local live updates across tabs/windows on the same browser
+- Export JSON backup
 
-```bash
-python -m http.server 8000
-```
+## Important: local-only storage
 
-Then open `http://localhost:8000`.
+This version does not use Firebase, Supabase, login, server, or database.
 
-## Deploy on GitHub Pages
+That means:
+
+- Data is saved only in the browser/device where the website is opened.
+- It updates instantly on the same device.
+- It can sync across multiple tabs/windows of the same browser.
+- It will not sync live between different phones unless you later add a backend.
+
+## GitHub Pages upload
 
 1. Create a new GitHub repository.
-2. Upload these files directly into the repository root.
+2. Upload these files directly in the repository root.
 3. Go to **Settings → Pages**.
-4. Under **Build and deployment**, choose **Deploy from a branch**.
-5. Select branch `main` and folder `/root`.
+4. Select **Deploy from branch**.
+5. Choose your main branch and root folder.
 6. Save.
 
-## Make realtime work between all friends
+## Backup tip
 
-GitHub Pages is static, so true multi-device realtime needs a realtime database. This app already supports Firebase Realtime Database.
+Use the **Export** button to download a JSON backup of the trip data.
 
-### Step 1: Create Firebase project
+## Bill photo note
 
-1. Go to Firebase Console.
-2. Create a project.
-3. Add a Web App.
-4. Copy the Firebase config object.
-5. Create a Realtime Database.
-
-### Step 2: Paste config in `app.js`
-
-In `app.js`, replace the empty values:
-
-```js
-const FIREBASE_CONFIG = {
-  apiKey: "",
-  authDomain: "",
-  databaseURL: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
-};
-```
-
-### Step 3: Database rules for a private friend group
-
-For quick testing, Firebase may ask for database rules. A very simple temporary rule is:
-
-```json
-{
-  "rules": {
-    "trips": {
-      "$tripId": {
-        ".read": true,
-        ".write": true
-      }
-    }
-  }
-}
-```
-
-Important: public read/write rules are okay only for quick testing. For a real private trip, use Firebase Authentication or stricter rules before sharing widely.
-
-## Use separate rooms
-
-Add a room name to the URL:
-
-```txt
-https://yourusername.github.io/yourrepo/?room=mussoorie-2026
-```
-
-Everyone using the same room link sees the same live trip data.
-
-## Notes
-
-- If item prices are added for all restaurant items, the final bill is split proportionally by item price.
-- If item prices are missing, the final bill is split equally among friends who added items for that stop.
-- Orders count in settlement just like expenses. The friend marked as “Paid by” gets credit for paying the bill.
+Bill photos are compressed before saving, but browser storage is limited. If storage gets full, remove older bill photos or export your backup.

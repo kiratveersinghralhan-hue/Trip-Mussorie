@@ -1,243 +1,438 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getDatabase, onValue, ref, set } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+const STORAGE_KEY = "tripSplit.mussoorie.clean.v1";
+const CHANNEL_NAME = "tripSplitLocalSync";
 
-/*
-  ✅ GitHub Pages-ready static app.
-  ✅ For realtime between all friends, paste your Firebase web config below.
-  ✅ Without Firebase, the app works locally and syncs instantly between tabs on the same device.
-*/
-const FIREBASE_CONFIG = {
-  apiKey: "",
-  authDomain: "",
-  databaseURL: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
-};
+const defaultFriends = [
+  "Aarav",
+  "Kabir",
+  "Vivaan",
+  "Reyansh",
+  "Arjun",
+  "Dhruv",
+  "Ishaan"
+];
 
-const DEFAULT_ROOM = "mussoorie-boys-trip";
-const ROOM_ID = new URLSearchParams(location.search).get("room") || DEFAULT_ROOM;
-const STORAGE_KEY = `boysTripState:${ROOM_ID}`;
-const CHANNEL_NAME = `boysTripChannel:${ROOM_ID}`;
-const INR = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
+const money = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 0
+});
 
-const appRoot = document.querySelector("#app");
-const syncDot = document.querySelector("#syncDot");
-const syncTitle = document.querySelector("#syncTitle");
-const syncDetail = document.querySelector("#syncDetail");
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
-let firebaseRef = null;
-let usingFirebase = false;
-let saveTimer = null;
-let remoteApplying = false;
-let channel = null;
+const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const defaultState = () => ({
-  version: 1,
-  tripName: "Mussoorie Boys Trip",
-  updatedAt: new Date().toISOString(),
-  members: [
-    { id: "m1", name: "Aryan", budget: 6000 },
-    { id: "m2", name: "Kabir", budget: 6000 },
-    { id: "m3", name: "Rohit", budget: 6000 },
-    { id: "m4", name: "Yash", budget: 6000 },
-    { id: "m5", name: "Dev", budget: 6000 },
-    { id: "m6", name: "Kunal", budget: 6000 },
-    { id: "m7", name: "Aman", budget: 6000 }
-  ],
-  expenses: [
-    {
-      id: cryptoId(),
-      title: "Demo: cab advance",
-      amount: 1400,
-      paidBy: "m1",
-      splitBetween: ["m1", "m2", "m3", "m4", "m5", "m6", "m7"],
-      category: "Travel",
-      date: today()
-    }
-  ],
+const blankState = () => ({
+  trip: {
+    title: "Mussoorie Boys Trip",
+    destination: "Mussoorie, Uttarakhand"
+  },
+  activeTab: "dashboard",
+  friends: defaultFriends.map((name, index) => ({
+    id: makeId(),
+    name,
+    budget: 2500 + (index === 0 ? 500 : 0)
+  })),
+  expenses: [],
   orders: [
     {
-      id: cryptoId(),
-      place: "Demo: roadside café",
-      paidBy: "m2",
-      finalTotal: 840,
+      id: makeId(),
+      place: "Mussoorie Cafe Stop",
+      total: 0,
       createdAt: new Date().toISOString(),
-      items: [
-        { id: cryptoId(), memberId: "m1", name: "Maggie", qty: 1, price: 0 },
-        { id: cryptoId(), memberId: "m2", name: "Tea", qty: 2, price: 0 },
-        { id: cryptoId(), memberId: "m3", name: "Sandwich", qty: 1, price: 0 }
-      ]
+      items: []
     }
-  ]
+  ],
+  bills: []
 });
 
 let state = loadState();
+let saveTimer;
+let toastTimer;
+let channel;
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function cryptoId() {
-  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+try {
+  channel = new BroadcastChannel(CHANNEL_NAME);
+  channel.onmessage = (event) => {
+    if (event.data?.type === "state-update") {
+      state = event.data.state;
+      render();
+    }
+  };
+} catch (_) {
+  channel = null;
 }
 
 function loadState() {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return normalizeState(saved || defaultState());
-  } catch {
-    return defaultState();
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return blankState();
+    const parsed = JSON.parse(saved);
+    if (!parsed.friends?.length) return blankState();
+    return {
+      ...blankState(),
+      ...parsed,
+      trip: { ...blankState().trip, ...(parsed.trip || {}) },
+      friends: parsed.friends || [],
+      expenses: parsed.expenses || [],
+      orders: parsed.orders?.length ? parsed.orders : blankState().orders,
+      bills: parsed.bills || []
+    };
+  } catch (error) {
+    console.warn("Could not load saved trip data", error);
+    return blankState();
   }
 }
 
-function normalizeState(next) {
-  const fresh = defaultState();
-  const merged = { ...fresh, ...(next || {}) };
-  merged.members = Array.isArray(merged.members) ? merged.members : fresh.members;
-  merged.expenses = Array.isArray(merged.expenses) ? merged.expenses : [];
-  merged.orders = Array.isArray(merged.orders) ? merged.orders : [];
-  merged.members = merged.members.map((member, index) => ({
-    id: member.id || cryptoId(),
-    name: member.name || `Friend ${index + 1}`,
-    budget: Number(member.budget) || 0
-  }));
-  merged.expenses = merged.expenses.map(expense => ({
-    id: expense.id || cryptoId(),
-    title: expense.title || "Expense",
-    amount: Number(expense.amount) || 0,
-    paidBy: expense.paidBy || merged.members[0]?.id || "",
-    splitBetween: Array.isArray(expense.splitBetween) && expense.splitBetween.length ? expense.splitBetween : merged.members.map(m => m.id),
-    category: expense.category || "General",
-    date: expense.date || today()
-  }));
-  merged.orders = merged.orders.map(order => ({
-    id: order.id || cryptoId(),
-    place: order.place || "Restaurant stop",
-    paidBy: order.paidBy || merged.members[0]?.id || "",
-    finalTotal: Number(order.finalTotal) || 0,
-    createdAt: order.createdAt || new Date().toISOString(),
-    items: Array.isArray(order.items) ? order.items.map(item => ({
-      id: item.id || cryptoId(),
-      memberId: item.memberId || merged.members[0]?.id || "",
-      name: item.name || "Item",
-      qty: Number(item.qty) || 1,
-      price: Number(item.price) || 0
-    })) : []
-  }));
-  return merged;
+function persist({ silent = false } = {}) {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      channel?.postMessage({ type: "state-update", state });
+      if (!silent) showToast("Saved locally");
+    } catch (error) {
+      console.error(error);
+      showToast("Storage full. Export backup or remove old bill photos.");
+    }
+  }, 120);
 }
 
-function hasFirebaseConfig() {
-  return Boolean(
-    FIREBASE_CONFIG.apiKey &&
-    FIREBASE_CONFIG.databaseURL &&
-    FIREBASE_CONFIG.projectId &&
-    !FIREBASE_CONFIG.apiKey.includes("PASTE")
-  );
-}
-
-function setSyncStatus(mode, title, detail) {
-  syncDot.className = `dot ${mode}`;
-  syncTitle.textContent = title;
-  syncDetail.textContent = detail;
-}
-
-async function initRealtime() {
-  setupLocalRealtime();
-
-  if (!hasFirebaseConfig()) {
-    setSyncStatus("local", "Local live mode", "Add Firebase config for friend-to-friend realtime");
+window.addEventListener("storage", (event) => {
+  if (event.key !== STORAGE_KEY || !event.newValue) return;
+  try {
+    state = JSON.parse(event.newValue);
     render();
+  } catch (_) {}
+});
+
+function showToast(message) {
+  const toast = $("#toast");
+  toast.textContent = message;
+  toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("show"), 1900);
+}
+
+function formatMoney(value) {
+  return money.format(Number(value || 0));
+}
+
+function friendById(id) {
+  return state.friends.find((friend) => friend.id === id);
+}
+
+function getActiveOrder() {
+  if (!state.orders.length) {
+    state.orders.push({ id: makeId(), place: "New food stop", total: 0, createdAt: new Date().toISOString(), items: [] });
+  }
+  return state.orders[0];
+}
+
+function totals() {
+  const totalBudget = state.friends.reduce((sum, friend) => sum + Number(friend.budget || 0), 0);
+  const totalSpent = state.expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const friendCount = state.friends.length;
+  return {
+    totalBudget,
+    totalSpent,
+    remaining: totalBudget - totalSpent,
+    avg: friendCount ? totalSpent / friendCount : 0
+  };
+}
+
+function calculateSettlements() {
+  const balance = new Map(state.friends.map((friend) => [friend.id, 0]));
+
+  state.expenses.forEach((expense) => {
+    const amount = Number(expense.amount || 0);
+    const splitWith = expense.splitWith?.length ? expense.splitWith : state.friends.map((friend) => friend.id);
+    if (!amount || !expense.paidBy || !splitWith.length) return;
+    balance.set(expense.paidBy, (balance.get(expense.paidBy) || 0) + amount);
+    const share = amount / splitWith.length;
+    splitWith.forEach((id) => balance.set(id, (balance.get(id) || 0) - share));
+  });
+
+  const debtors = [];
+  const creditors = [];
+  balance.forEach((value, id) => {
+    const rounded = Math.round(value);
+    if (rounded < 0) debtors.push({ id, amount: Math.abs(rounded) });
+    if (rounded > 0) creditors.push({ id, amount: rounded });
+  });
+
+  const settlements = [];
+  let d = 0;
+  let c = 0;
+  while (d < debtors.length && c < creditors.length) {
+    const pay = Math.min(debtors[d].amount, creditors[c].amount);
+    if (pay > 0) {
+      settlements.push({ from: debtors[d].id, to: creditors[c].id, amount: pay });
+    }
+    debtors[d].amount -= pay;
+    creditors[c].amount -= pay;
+    if (debtors[d].amount <= 0) d += 1;
+    if (creditors[c].amount <= 0) c += 1;
+  }
+  return settlements;
+}
+
+function render() {
+  renderTripHeader();
+  renderTabs();
+  renderFriendOptions();
+  renderDashboard();
+  renderFriends();
+  renderExpenses();
+  renderOrders();
+  renderBills();
+}
+
+function renderTripHeader() {
+  $("#tripTitle").textContent = state.trip.title;
+  $("#tripDestination").textContent = state.trip.destination;
+}
+
+function renderTabs() {
+  $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === state.activeTab));
+  $$(".panel").forEach((panel) => panel.classList.remove("active"));
+  $(`#${state.activeTab}Panel`)?.classList.add("active");
+}
+
+function renderFriendOptions() {
+  const options = state.friends.map((friend) => `<option value="${friend.id}">${escapeHtml(friend.name)}</option>`).join("");
+  ["#quickExpensePaidBy", "#expensePaidBy", "#orderFriend"].forEach((selector) => {
+    const element = $(selector);
+    const current = element.value;
+    element.innerHTML = options;
+    if (state.friends.some((friend) => friend.id === current)) element.value = current;
+  });
+
+  const split = $("#splitWithList");
+  split.innerHTML = state.friends.map((friend) => `
+    <label class="check-pill">
+      <input type="checkbox" value="${friend.id}" checked />
+      ${escapeHtml(friend.name)}
+    </label>
+  `).join("");
+}
+
+function renderDashboard() {
+  const tripTotals = totals();
+  $("#totalBudget").textContent = formatMoney(tripTotals.totalBudget);
+  $("#totalSpent").textContent = formatMoney(tripTotals.totalSpent);
+  $("#remainingBudget").textContent = formatMoney(tripTotals.remaining);
+  $("#perPersonAvg").textContent = formatMoney(tripTotals.avg);
+  $("#friendCountText").textContent = `${state.friends.length} friends`;
+  $("#remainingHint").textContent = tripTotals.remaining >= 0 ? "Safe to spend" : "Over budget";
+
+  const settlements = calculateSettlements();
+  const list = $("#settlementList");
+  list.innerHTML = settlements.map((item) => {
+    const from = friendById(item.from)?.name || "Someone";
+    const to = friendById(item.to)?.name || "Someone";
+    return `
+      <div class="list-item">
+        <div class="item-top">
+          <div>
+            <div class="item-title">${escapeHtml(from)} → ${escapeHtml(to)}</div>
+            <div class="item-meta">Final settlement</div>
+          </div>
+          <div class="money">${formatMoney(item.amount)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderFriends() {
+  const list = $("#friendsList");
+  list.innerHTML = state.friends.map((friend, index) => `
+    <article class="friend-card" data-id="${friend.id}">
+      <div class="friend-top">
+        <div class="avatar">${escapeHtml(friend.name.charAt(0) || "F")}</div>
+        <button class="icon-btn remove-friend" title="Remove friend" type="button">×</button>
+      </div>
+      <label>
+        Name
+        <input class="friend-name" value="${escapeAttr(friend.name)}" />
+      </label>
+      <label style="margin-top: 12px;">
+        Budget
+        <input class="friend-budget" type="number" min="0" step="1" value="${Number(friend.budget || 0)}" />
+      </label>
+      <p class="item-meta" style="margin-top: 12px;">Friend ${index + 1}</p>
+    </article>
+  `).join("");
+}
+
+function renderExpenses() {
+  const list = $("#expensesList");
+  list.innerHTML = state.expenses.slice().reverse().map((expense) => {
+    const paidBy = friendById(expense.paidBy)?.name || "Unknown";
+    const splitNames = (expense.splitWith || []).map((id) => friendById(id)?.name).filter(Boolean);
+    const bill = expense.billId ? state.bills.find((item) => item.id === expense.billId) : null;
+    return `
+      <div class="list-item" data-id="${expense.id}">
+        <div class="item-top">
+          <div>
+            <div class="item-title">${escapeHtml(expense.title)}</div>
+            <div class="item-meta">Paid by ${escapeHtml(paidBy)} · Split ${splitNames.length ? `between ${escapeHtml(splitNames.join(", "))}` : "equally"}</div>
+          </div>
+          <div class="money">${formatMoney(expense.amount)}</div>
+        </div>
+        <div class="item-top">
+          ${bill ? `<button class="receipt-link open-bill" data-bill="${bill.id}" type="button">📸 View bill</button>` : `<span class="item-meta">No bill attached</span>`}
+          <button class="icon-btn remove-expense" title="Delete expense" type="button">×</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderOrders() {
+  const order = getActiveOrder();
+  $("#orderPlace").value = order.place || "";
+  $("#orderTotal").value = order.total || "";
+  $("#orderTitle").textContent = order.place || "Current order";
+
+  const orderers = [...new Set(order.items.map((item) => item.friendId))];
+  const split = Number(order.total || 0) && orderers.length ? Number(order.total) / orderers.length : 0;
+  $("#orderSplitText").textContent = orderers.length
+    ? `${orderers.length} people ordered${split ? ` · ${formatMoney(split)} each` : ""}`
+    : "Add item names from friends.";
+
+  const list = $("#orderItemsList");
+  list.innerHTML = order.items.map((item) => {
+    const friend = friendById(item.friendId)?.name || "Friend";
+    return `
+      <div class="list-item" data-id="${item.id}">
+        <div class="item-top">
+          <div>
+            <div class="item-title">${escapeHtml(item.name)}</div>
+            <div class="item-meta">${escapeHtml(friend)}</div>
+          </div>
+          <button class="icon-btn remove-order-item" title="Remove item" type="button">×</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderBills() {
+  const list = $("#billsList");
+  list.innerHTML = state.bills.slice().reverse().map((bill) => `
+    <article class="bill-card" data-id="${bill.id}">
+      <img src="${bill.image}" alt="${escapeAttr(bill.title)}" loading="lazy" />
+      <div class="bill-body">
+        <strong>${escapeHtml(bill.title)}</strong>
+        <div class="item-meta">${bill.amount ? formatMoney(bill.amount) : "Amount not added"}</div>
+        <div class="bill-actions">
+          <button class="secondary-btn small view-bill" type="button">View</button>
+          <button class="danger-btn small remove-bill" type="button">Delete</button>
+        </div>
+      </div>
+    </article>
+  `).join("");
+}
+
+async function addExpenseFromForm({ titleInput, amountInput, paidByInput, fileInput, splitIds }) {
+  const title = titleInput.value.trim();
+  const amount = Number(amountInput.value);
+  const paidBy = paidByInput.value;
+  if (!title || !amount || !paidBy) return;
+
+  let billId = "";
+  const file = fileInput?.files?.[0];
+  if (file) {
+    const image = await compressImage(file);
+    const bill = {
+      id: makeId(),
+      title: `${title} bill`,
+      amount,
+      image,
+      createdAt: new Date().toISOString()
+    };
+    state.bills.push(bill);
+    billId = bill.id;
+    fileInput.value = "";
+  }
+
+  state.expenses.push({
+    id: makeId(),
+    title,
+    amount,
+    paidBy,
+    splitWith: splitIds?.length ? splitIds : state.friends.map((friend) => friend.id),
+    billId,
+    createdAt: new Date().toISOString()
+  });
+  titleInput.value = "";
+  amountInput.value = "";
+  persist();
+  render();
+}
+
+async function compressImage(file) {
+  const dataUrl = await fileToDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const maxSize = 1400;
+  const ratio = Math.min(maxSize / image.width, maxSize / image.height, 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(image.width * ratio);
+  canvas.height = Math.round(image.height * ratio);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.74);
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function openBill(id) {
+  const bill = state.bills.find((item) => item.id === id);
+  if (!bill) return;
+  const win = window.open("", "_blank");
+  if (!win) {
+    showToast("Popup blocked. Allow popups to view bill.");
     return;
   }
-
-  try {
-    const fbApp = initializeApp(FIREBASE_CONFIG);
-    const db = getDatabase(fbApp);
-    firebaseRef = ref(db, `trips/${ROOM_ID}`);
-    usingFirebase = true;
-
-    onValue(firebaseRef, snapshot => {
-      const remote = snapshot.val();
-      if (!remote) {
-        writeFirebase(state);
-        return;
-      }
-      remoteApplying = true;
-      state = normalizeState(remote);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      render();
-      remoteApplying = false;
-      setSyncStatus("online", "Realtime online", `Room: ${ROOM_ID}`);
-    }, error => {
-      setSyncStatus("error", "Firebase error", error.message);
-      usingFirebase = false;
-      render();
-    });
-  } catch (error) {
-    setSyncStatus("error", "Firebase setup failed", "Using local backup mode");
-    usingFirebase = false;
-    render();
-  }
+  win.document.write(`
+    <!DOCTYPE html>
+    <html><head><title>${escapeHtml(bill.title)}</title><meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>body{margin:0;font-family:system-ui;background:#111;color:#fff;display:grid;gap:14px;place-items:center;min-height:100vh;padding:18px}img{max-width:min(100%,900px);max-height:82vh;border-radius:18px;background:#222}h1{font-size:20px;margin:0}.meta{opacity:.75}</style>
+    </head><body><h1>${escapeHtml(bill.title)}</h1><div class="meta">${bill.amount ? formatMoney(bill.amount) : "Bill photo"}</div><img src="${bill.image}" alt="${escapeAttr(bill.title)}" /></body></html>
+  `);
+  win.document.close();
 }
 
-function setupLocalRealtime() {
-  if ("BroadcastChannel" in window) {
-    channel = new BroadcastChannel(CHANNEL_NAME);
-    channel.onmessage = event => {
-      if (!event.data || event.data.updatedAt === state.updatedAt) return;
-      remoteApplying = true;
-      state = normalizeState(event.data);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      render();
-      remoteApplying = false;
-    };
-  }
-
-  window.addEventListener("storage", event => {
-    if (event.key !== STORAGE_KEY || !event.newValue) return;
-    try {
-      const incoming = normalizeState(JSON.parse(event.newValue));
-      if (incoming.updatedAt === state.updatedAt) return;
-      remoteApplying = true;
-      state = incoming;
-      render();
-      remoteApplying = false;
-    } catch {
-      // Ignore invalid local storage payloads.
-    }
-  });
+function exportData() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "mussoorie-trip-backup.json";
+  link.click();
+  URL.revokeObjectURL(link.href);
+  showToast("Backup exported");
 }
 
-function commit({ immediate = false } = {}) {
-  if (remoteApplying) return;
-  state.updatedAt = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  if (channel) channel.postMessage(state);
-  render();
-
-  clearTimeout(saveTimer);
-  const delay = immediate ? 0 : 350;
-  saveTimer = setTimeout(() => {
-    if (usingFirebase && firebaseRef) writeFirebase(state);
-  }, delay);
-}
-
-function writeFirebase(payload) {
-  return set(firebaseRef, payload).catch(error => {
-    setSyncStatus("error", "Could not save online", error.message);
-  });
-}
-
-function money(value) {
-  return INR.format(Number(value) || 0);
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
+function escapeHtml(value = "") {
+  return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -245,566 +440,197 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function memberName(id) {
-  return state.members.find(member => member.id === id)?.name || "Unknown friend";
+function escapeAttr(value = "") {
+  return escapeHtml(value).replaceAll("`", "&#096;");
 }
 
-function memberOptions(selectedId = "") {
-  return state.members.map(member => `
-    <option value="${escapeHtml(member.id)}" ${member.id === selectedId ? "selected" : ""}>${escapeHtml(member.name)}</option>
-  `).join("");
-}
-
-function calcOrderShares(order) {
-  const items = order.items || [];
-  const participants = [...new Set(items.map(item => item.memberId).filter(Boolean))];
-  const rawItemTotal = items.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.qty) || 1), 0);
-  const finalTotal = Number(order.finalTotal) || rawItemTotal;
-  const allItemsPriced = items.length > 0 && items.every(item => Number(item.price) > 0);
-  const shares = Object.fromEntries(state.members.map(member => [member.id, 0]));
-
-  if (!items.length || finalTotal <= 0) return { finalTotal: 0, rawItemTotal: 0, shares, participants };
-
-  if (allItemsPriced && rawItemTotal > 0) {
-    items.forEach(item => {
-      const itemTotal = (Number(item.price) || 0) * (Number(item.qty) || 1);
-      shares[item.memberId] = (shares[item.memberId] || 0) + (itemTotal / rawItemTotal) * finalTotal;
+function bindEvents() {
+  $$(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      state.activeTab = tab.dataset.tab;
+      persist({ silent: true });
+      renderTabs();
     });
-  } else {
-    const equalShare = participants.length ? finalTotal / participants.length : 0;
-    participants.forEach(memberId => { shares[memberId] = equalShare; });
-  }
-
-  return { finalTotal, rawItemTotal, shares, participants };
-}
-
-function totals() {
-  const perMember = Object.fromEntries(state.members.map(member => [member.id, {
-    member,
-    budget: Number(member.budget) || 0,
-    paid: 0,
-    share: 0,
-    orderShare: 0,
-    expenseShare: 0,
-    balance: 0
-  }]));
-
-  for (const expense of state.expenses) {
-    const amount = Number(expense.amount) || 0;
-    const splitBetween = (expense.splitBetween || []).filter(id => perMember[id]);
-    if (perMember[expense.paidBy]) perMember[expense.paidBy].paid += amount;
-    const each = splitBetween.length ? amount / splitBetween.length : 0;
-    splitBetween.forEach(id => {
-      perMember[id].share += each;
-      perMember[id].expenseShare += each;
-    });
-  }
-
-  for (const order of state.orders) {
-    const { finalTotal, shares } = calcOrderShares(order);
-    if (perMember[order.paidBy]) perMember[order.paidBy].paid += finalTotal;
-    Object.entries(shares).forEach(([id, amount]) => {
-      if (perMember[id]) {
-        perMember[id].share += amount;
-        perMember[id].orderShare += amount;
-      }
-    });
-  }
-
-  Object.values(perMember).forEach(row => {
-    row.balance = row.paid - row.share;
   });
 
-  const totalBudget = Object.values(perMember).reduce((sum, row) => sum + row.budget, 0);
-  const expenseTotal = state.expenses.reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
-  const orderTotal = state.orders.reduce((sum, order) => sum + calcOrderShares(order).finalTotal, 0);
-  const totalSpent = expenseTotal + orderTotal;
-
-  return {
-    perMember,
-    totalBudget,
-    expenseTotal,
-    orderTotal,
-    totalSpent,
-    remaining: totalBudget - totalSpent
-  };
-}
-
-function settlementRows(perMember) {
-  const debtors = Object.values(perMember)
-    .filter(row => row.balance < -0.5)
-    .map(row => ({ id: row.member.id, name: row.member.name, amount: Math.abs(row.balance) }))
-    .sort((a, b) => b.amount - a.amount);
-
-  const creditors = Object.values(perMember)
-    .filter(row => row.balance > 0.5)
-    .map(row => ({ id: row.member.id, name: row.member.name, amount: row.balance }))
-    .sort((a, b) => b.amount - a.amount);
-
-  const rows = [];
-  let d = 0;
-  let c = 0;
-
-  while (d < debtors.length && c < creditors.length) {
-    const amount = Math.min(debtors[d].amount, creditors[c].amount);
-    rows.push({ from: debtors[d].name, to: creditors[c].name, amount });
-    debtors[d].amount -= amount;
-    creditors[c].amount -= amount;
-    if (debtors[d].amount <= 0.5) d += 1;
-    if (creditors[c].amount <= 0.5) c += 1;
-  }
-
-  return rows;
-}
-
-function render() {
-  const summary = totals();
-  appRoot.innerHTML = `
-    ${renderDashboard(summary)}
-    ${renderFriends(summary)}
-    ${renderExpenseForm()}
-    ${renderExpenses()}
-    ${renderOrders()}
-    ${renderSettlement(summary)}
-    ${renderSettings()}
-  `;
-}
-
-function renderDashboard(summary) {
-  return `
-    <section class="card span-12">
-      <div class="card-body stats">
-        <div class="stat"><small>Total group budget</small><strong>${money(summary.totalBudget)}</strong></div>
-        <div class="stat"><small>Total spent</small><strong>${money(summary.totalSpent)}</strong></div>
-        <div class="stat"><small>Remaining</small><strong class="${summary.remaining >= 0 ? "balance-positive" : "balance-negative"}">${money(summary.remaining)}</strong></div>
-        <div class="stat"><small>Friends</small><strong>${state.members.length}</strong></div>
-      </div>
-    </section>
-  `;
-}
-
-function renderFriends(summary) {
-  const rows = state.members.map(member => {
-    const row = summary.perMember[member.id];
-    const balanceClass = row.balance > 0.5 ? "balance-positive" : row.balance < -0.5 ? "balance-negative" : "balance-neutral";
-    return `
-      <div class="friend-row">
-        <div class="field">
-          <label>Name</label>
-          <input value="${escapeHtml(member.name)}" data-action="member-name" data-id="${escapeHtml(member.id)}" placeholder="Friend name" />
-        </div>
-        <div class="field">
-          <label>Budget</label>
-          <input type="number" min="0" value="${member.budget}" data-action="member-budget" data-id="${escapeHtml(member.id)}" />
-        </div>
-        <div class="friend-money"><small>Used</small><strong>${money(row.share)}</strong></div>
-        <div class="friend-money"><small>Balance</small><strong class="${balanceClass}">${row.balance >= 0 ? "+" : ""}${money(row.balance)}</strong></div>
-        <button class="btn danger small" data-action="remove-member" data-id="${escapeHtml(member.id)}">Remove</button>
-      </div>
-    `;
-  }).join("");
-
-  return `
-    <section class="card span-12">
-      <div class="card-header">
-        <div>
-          <h2>👬 Friends & budgets</h2>
-          <p>Start with 7 friends. Rename anyone, update budgets, or add/remove friends anytime.</p>
-        </div>
-        <div class="toolbar">
-          <button class="btn" data-action="add-member">+ Add friend</button>
-        </div>
-      </div>
-      <div class="card-body friend-list">${rows}</div>
-    </section>
-  `;
-}
-
-function renderExpenseForm() {
-  const splitChips = state.members.map(member => `
-    <label class="chip checkbox-chip">
-      <input type="checkbox" name="splitBetween" value="${escapeHtml(member.id)}" checked>
-      <span>${escapeHtml(member.name)}</span>
-    </label>
-  `).join("");
-
-  return `
-    <section class="card span-7">
-      <div class="card-header">
-        <div>
-          <h2>💸 Add expense</h2>
-          <p>For hotels, fuel, cab, activities, parking, snacks — choose who paid and who shares it.</p>
-        </div>
-      </div>
-      <div class="card-body">
-        <form class="form-grid" id="expenseForm">
-          <div class="field col-6">
-            <label for="expenseTitle">Expense name</label>
-            <input id="expenseTitle" name="title" required placeholder="Hotel booking, petrol, cab..." />
-          </div>
-          <div class="field col-3">
-            <label for="expenseAmount">Amount</label>
-            <input id="expenseAmount" name="amount" type="number" min="1" step="1" required placeholder="₹" />
-          </div>
-          <div class="field col-3">
-            <label for="expenseDate">Date</label>
-            <input id="expenseDate" name="date" type="date" value="${today()}" />
-          </div>
-          <div class="field col-4">
-            <label for="paidBy">Paid by</label>
-            <select id="paidBy" name="paidBy">${memberOptions(state.members[0]?.id)}</select>
-          </div>
-          <div class="field col-4">
-            <label for="category">Category</label>
-            <select id="category" name="category">
-              <option>Travel</option>
-              <option>Stay</option>
-              <option>Food</option>
-              <option>Adventure</option>
-              <option>Shopping</option>
-              <option>General</option>
-            </select>
-          </div>
-          <div class="field col-4">
-            <label>&nbsp;</label>
-            <button class="btn" type="submit">Add expense</button>
-          </div>
-          <div class="field col-12">
-            <span class="label">Split between</span>
-            <div class="split-box">${splitChips}</div>
-          </div>
-        </form>
-      </div>
-    </section>
-  `;
-}
-
-function renderExpenses() {
-  const rows = [...state.expenses].reverse().map(expense => `
-    <div class="expense-row">
-      <div>
-        <div class="expense-title">
-          <strong>${escapeHtml(expense.title)}</strong>
-          <span class="money-pill">${money(expense.amount)}</span>
-        </div>
-        <div class="expense-meta">
-          <span class="chip">Paid by ${escapeHtml(memberName(expense.paidBy))}</span>
-          <span class="chip">${escapeHtml(expense.category)}</span>
-          <span class="chip">${escapeHtml(expense.date)}</span>
-          <span class="chip">Split: ${(expense.splitBetween || []).map(memberName).map(escapeHtml).join(", ")}</span>
-        </div>
-      </div>
-      <button class="btn danger small" data-action="delete-expense" data-id="${escapeHtml(expense.id)}">Delete</button>
-    </div>
-  `).join("");
-
-  return `
-    <section class="card span-5">
-      <div class="card-header">
-        <div>
-          <h2>🧾 Expense log</h2>
-          <p>Every update recalculates balances instantly.</p>
-        </div>
-      </div>
-      <div class="card-body expense-list">
-        ${rows || `<div class="empty">No expenses yet. Add the first one.</div>`}
-      </div>
-    </section>
-  `;
-}
-
-function renderOrders() {
-  const orderCards = state.orders.map(order => {
-    const orderSummary = calcOrderShares(order);
-    const itemRows = order.items.map(item => `
-      <div class="item-row">
-        <span><strong>${escapeHtml(memberName(item.memberId))}</strong></span>
-        <span>${escapeHtml(item.name)}</span>
-        <span>Qty ${Number(item.qty) || 1}</span>
-        <span>${Number(item.price) ? money((Number(item.price) || 0) * (Number(item.qty) || 1)) : "No price"}</span>
-        <button class="btn danger small" data-action="delete-order-item" data-order-id="${escapeHtml(order.id)}" data-id="${escapeHtml(item.id)}">Delete</button>
-      </div>
-    `).join("");
-
-    const shareChips = Object.entries(orderSummary.shares)
-      .filter(([, amount]) => amount > 0.5)
-      .map(([id, amount]) => `<span class="chip">${escapeHtml(memberName(id))}: ${money(amount)}</span>`)
-      .join("");
-
-    return `
-      <article class="order-card">
-        <div class="order-top">
-          <div>
-            <h3>🍽️ ${escapeHtml(order.place)}</h3>
-            <div class="order-summary">
-              <span class="chip">Bill: ${money(orderSummary.finalTotal)}</span>
-              <span class="chip">Paid by ${escapeHtml(memberName(order.paidBy))}</span>
-              <span class="chip">${order.items.length} item${order.items.length === 1 ? "" : "s"}</span>
-            </div>
-          </div>
-          <button class="btn danger small" data-action="delete-order" data-id="${escapeHtml(order.id)}">Delete stop</button>
-        </div>
-
-        <div class="form-grid">
-          <div class="field col-4">
-            <label>Final order total</label>
-            <input type="number" min="0" step="1" value="${order.finalTotal || ""}" data-action="order-total" data-id="${escapeHtml(order.id)}" placeholder="Enter final bill" />
-          </div>
-          <div class="field col-4">
-            <label>Paid by</label>
-            <select data-action="order-paid-by" data-id="${escapeHtml(order.id)}">${memberOptions(order.paidBy)}</select>
-          </div>
-          <div class="field col-4">
-            <label>Place name</label>
-            <input value="${escapeHtml(order.place)}" data-action="order-place" data-id="${escapeHtml(order.id)}" />
-          </div>
-        </div>
-
-        <form class="form-grid" data-order-form="${escapeHtml(order.id)}">
-          <div class="field col-3">
-            <label>Friend</label>
-            <select name="memberId">${memberOptions(state.members[0]?.id)}</select>
-          </div>
-          <div class="field col-4">
-            <label>Item name</label>
-            <input name="item" required placeholder="Burger, chai, momos..." />
-          </div>
-          <div class="field col-2">
-            <label>Qty</label>
-            <input name="qty" type="number" min="1" value="1" />
-          </div>
-          <div class="field col-2">
-            <label>Price optional</label>
-            <input name="price" type="number" min="0" step="1" placeholder="₹" />
-          </div>
-          <div class="field col-1">
-            <label>&nbsp;</label>
-            <button class="btn small" type="submit">Add</button>
-          </div>
-        </form>
-
-        <div class="order-items">${itemRows || `<div class="empty">No items yet. Friends can add what they ordered.</div>`}</div>
-        <div class="split-box">${shareChips || `<span class="chip">Add items and total to calculate shares</span>`}</div>
-      </article>
-    `;
-  }).join("");
-
-  return `
-    <section class="card span-8">
-      <div class="card-header">
-        <div>
-          <h2>🥘 Restaurant order board</h2>
-          <p>Use this when you stop at a restaurant. Friends add item names, then you enter the final bill total.</p>
-        </div>
-        <div class="toolbar"><button class="btn" data-action="add-order">+ New stop</button></div>
-      </div>
-      <div class="card-body order-list">
-        ${orderCards || `<div class="empty">No restaurant stops yet. Create one when you stop for food.</div>`}
-      </div>
-    </section>
-  `;
-}
-
-function renderSettlement(summary) {
-  const rows = settlementRows(summary.perMember).map(row => `
-    <div class="settlement-row">
-      <span><strong>${escapeHtml(row.from)}</strong> pays <strong>${escapeHtml(row.to)}</strong></span>
-      <strong class="balance-negative">${money(row.amount)}</strong>
-    </div>
-  `).join("");
-
-  return `
-    <section class="card span-4">
-      <div class="card-header">
-        <div>
-          <h2>🤝 Settlement</h2>
-          <p>Simple who-pays-whom list based on expenses and restaurant orders.</p>
-        </div>
-      </div>
-      <div class="card-body settlement-list">
-        ${rows || `<div class="empty">All settled right now 🎉</div>`}
-      </div>
-    </section>
-  `;
-}
-
-function renderSettings() {
-  return `
-    <section class="card span-12">
-      <div class="card-header">
-        <div>
-          <h2>⚙️ Trip controls</h2>
-          <p>Use room links for different trips. Example: <span class="chip">?room=trip-2026</span></p>
-        </div>
-        <div class="toolbar">
-          <button class="btn secondary" data-action="download-json">Download backup</button>
-          <button class="btn danger" data-action="reset-demo">Reset demo data</button>
-        </div>
-      </div>
-      <div class="card-body">
-        <p class="footer-note">
-          Current room: <strong>${escapeHtml(ROOM_ID)}</strong>. Firebase config is ${hasFirebaseConfig() ? "filled, so this can sync between friends online." : "empty, so this is local demo mode until you add Firebase config in app.js."}
-        </p>
-      </div>
-    </section>
-  `;
-}
-
-function addMember() {
-  state.members.push({ id: cryptoId(), name: `Friend ${state.members.length + 1}`, budget: 6000 });
-  commit({ immediate: true });
-}
-
-function removeMember(id) {
-  if (state.members.length <= 1) {
-    alert("Keep at least one friend in the trip.");
-    return;
-  }
-  state.members = state.members.filter(member => member.id !== id);
-  const fallback = state.members[0]?.id || "";
-  state.expenses = state.expenses.map(expense => ({
-    ...expense,
-    paidBy: expense.paidBy === id ? fallback : expense.paidBy,
-    splitBetween: (expense.splitBetween || []).filter(memberId => memberId !== id)
-  })).filter(expense => expense.splitBetween.length > 0);
-  state.orders = state.orders.map(order => ({
-    ...order,
-    paidBy: order.paidBy === id ? fallback : order.paidBy,
-    items: order.items.filter(item => item.memberId !== id)
-  }));
-  commit({ immediate: true });
-}
-
-function addExpense(form) {
-  const formData = new FormData(form);
-  const splitBetween = formData.getAll("splitBetween");
-  if (!splitBetween.length) {
-    alert("Select at least one friend to split the expense.");
-    return;
-  }
-  state.expenses.push({
-    id: cryptoId(),
-    title: formData.get("title").trim(),
-    amount: Number(formData.get("amount")) || 0,
-    paidBy: formData.get("paidBy"),
-    splitBetween,
-    category: formData.get("category"),
-    date: formData.get("date") || today()
+  $("#tripTitle").addEventListener("blur", (event) => {
+    state.trip.title = event.target.textContent.trim() || "Mussoorie Boys Trip";
+    persist();
   });
-  form.reset();
-  commit({ immediate: true });
-}
 
-function addOrder() {
-  state.orders.unshift({
-    id: cryptoId(),
-    place: `Restaurant stop ${state.orders.length + 1}`,
-    paidBy: state.members[0]?.id || "",
-    finalTotal: 0,
-    createdAt: new Date().toISOString(),
-    items: []
+  $("#tripDestination").addEventListener("blur", (event) => {
+    state.trip.destination = event.target.textContent.trim() || "Mussoorie, Uttarakhand";
+    persist();
   });
-  commit({ immediate: true });
-}
 
-function addOrderItem(orderId, form) {
-  const order = state.orders.find(entry => entry.id === orderId);
-  if (!order) return;
-  const formData = new FormData(form);
-  order.items.push({
-    id: cryptoId(),
-    memberId: formData.get("memberId"),
-    name: formData.get("item").trim(),
-    qty: Number(formData.get("qty")) || 1,
-    price: Number(formData.get("price")) || 0
+  $("#exportBtn").addEventListener("click", exportData);
+
+  $("#addFriendBtn").addEventListener("click", () => {
+    state.friends.push({ id: makeId(), name: `Friend ${state.friends.length + 1}`, budget: 2500 });
+    persist();
+    render();
   });
-  form.reset();
-  commit({ immediate: true });
-}
 
-function downloadBackup() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${ROOM_ID}-backup.json`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
+  $("#friendsList").addEventListener("input", (event) => {
+    const card = event.target.closest(".friend-card");
+    if (!card) return;
+    const friend = friendById(card.dataset.id);
+    if (!friend) return;
+    if (event.target.classList.contains("friend-name")) friend.name = event.target.value;
+    if (event.target.classList.contains("friend-budget")) friend.budget = Number(event.target.value || 0);
+    persist({ silent: true });
+    renderFriendOptions();
+    renderDashboard();
+  });
 
-appRoot.addEventListener("submit", event => {
-  if (event.target.id === "expenseForm") {
-    event.preventDefault();
-    addExpense(event.target);
-  }
-
-  const orderId = event.target.dataset.orderForm;
-  if (orderId) {
-    event.preventDefault();
-    addOrderItem(orderId, event.target);
-  }
-});
-
-appRoot.addEventListener("click", event => {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
-
-  const { action, id, orderId } = button.dataset;
-
-  if (action === "add-member") addMember();
-  if (action === "remove-member") removeMember(id);
-  if (action === "delete-expense") {
-    state.expenses = state.expenses.filter(expense => expense.id !== id);
-    commit({ immediate: true });
-  }
-  if (action === "add-order") addOrder();
-  if (action === "delete-order") {
-    state.orders = state.orders.filter(order => order.id !== id);
-    commit({ immediate: true });
-  }
-  if (action === "delete-order-item") {
-    const order = state.orders.find(entry => entry.id === orderId);
-    if (order) order.items = order.items.filter(item => item.id !== id);
-    commit({ immediate: true });
-  }
-  if (action === "download-json") downloadBackup();
-  if (action === "reset-demo") {
-    if (confirm("Reset this room to demo data?")) {
-      state = defaultState();
-      commit({ immediate: true });
+  $("#friendsList").addEventListener("click", (event) => {
+    if (!event.target.classList.contains("remove-friend")) return;
+    const card = event.target.closest(".friend-card");
+    if (state.friends.length <= 1) {
+      showToast("Keep at least one friend");
+      return;
     }
-  }
-});
+    const id = card.dataset.id;
+    state.friends = state.friends.filter((friend) => friend.id !== id);
+    state.expenses = state.expenses.map((expense) => ({
+      ...expense,
+      splitWith: (expense.splitWith || []).filter((friendId) => friendId !== id)
+    })).filter((expense) => expense.paidBy !== id);
+    state.orders.forEach((order) => {
+      order.items = order.items.filter((item) => item.friendId !== id);
+    });
+    persist();
+    render();
+  });
 
-appRoot.addEventListener("change", event => {
-  const target = event.target;
-  const { action, id } = target.dataset;
-  if (!action) return;
+  $("#quickExpenseForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await addExpenseFromForm({
+      titleInput: $("#quickExpenseTitle"),
+      amountInput: $("#quickExpenseAmount"),
+      paidByInput: $("#quickExpensePaidBy"),
+      fileInput: $("#quickExpenseBill"),
+      splitIds: state.friends.map((friend) => friend.id)
+    });
+  });
 
-  if (action === "member-name") {
-    const member = state.members.find(entry => entry.id === id);
-    if (member) member.name = target.value.trim() || "Friend";
-  }
-  if (action === "member-budget") {
-    const member = state.members.find(entry => entry.id === id);
-    if (member) member.budget = Number(target.value) || 0;
-  }
-  if (action === "order-total") {
-    const order = state.orders.find(entry => entry.id === id);
-    if (order) order.finalTotal = Number(target.value) || 0;
-  }
-  if (action === "order-paid-by") {
-    const order = state.orders.find(entry => entry.id === id);
-    if (order) order.paidBy = target.value;
-  }
-  if (action === "order-place") {
-    const order = state.orders.find(entry => entry.id === id);
-    if (order) order.place = target.value.trim() || "Restaurant stop";
-  }
+  $("#expenseForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const splitIds = $$("#splitWithList input:checked").map((input) => input.value);
+    await addExpenseFromForm({
+      titleInput: $("#expenseTitle"),
+      amountInput: $("#expenseAmount"),
+      paidByInput: $("#expensePaidBy"),
+      fileInput: $("#expenseBill"),
+      splitIds
+    });
+  });
 
-  commit();
-});
+  $("#clearExpensesBtn").addEventListener("click", () => {
+    if (!state.expenses.length) return;
+    if (!confirm("Clear all expenses?")) return;
+    state.expenses = [];
+    persist();
+    render();
+  });
 
-initRealtime();
+  $("#expensesList").addEventListener("click", (event) => {
+    const row = event.target.closest(".list-item");
+    if (!row) return;
+    if (event.target.classList.contains("remove-expense")) {
+      state.expenses = state.expenses.filter((expense) => expense.id !== row.dataset.id);
+      persist();
+      render();
+    }
+    if (event.target.classList.contains("open-bill")) {
+      openBill(event.target.dataset.bill);
+    }
+  });
+
+  $("#newOrderBtn").addEventListener("click", () => {
+    state.orders.unshift({ id: makeId(), place: "New food stop", total: 0, createdAt: new Date().toISOString(), items: [] });
+    persist();
+    render();
+    showToast("New order started");
+  });
+
+  $("#orderPlace").addEventListener("input", (event) => {
+    getActiveOrder().place = event.target.value;
+    persist({ silent: true });
+    $("#orderTitle").textContent = event.target.value || "Current order";
+  });
+
+  $("#addOrderItemBtn").addEventListener("click", () => {
+    const name = $("#orderItem").value.trim();
+    const friendId = $("#orderFriend").value;
+    if (!name || !friendId) return;
+    getActiveOrder().items.push({ id: makeId(), friendId, name, createdAt: new Date().toISOString() });
+    $("#orderItem").value = "";
+    persist();
+    renderOrders();
+  });
+
+  $("#saveOrderTotalBtn").addEventListener("click", () => {
+    getActiveOrder().total = Number($("#orderTotal").value || 0);
+    persist();
+    renderOrders();
+  });
+
+  $("#orderItemsList").addEventListener("click", (event) => {
+    if (!event.target.classList.contains("remove-order-item")) return;
+    const id = event.target.closest(".list-item").dataset.id;
+    const order = getActiveOrder();
+    order.items = order.items.filter((item) => item.id !== id);
+    persist();
+    renderOrders();
+  });
+
+  $("#billForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const file = $("#billPhoto").files?.[0];
+    const title = $("#billTitle").value.trim();
+    if (!file || !title) return;
+    try {
+      const image = await compressImage(file);
+      state.bills.push({
+        id: makeId(),
+        title,
+        amount: Number($("#billAmount").value || 0),
+        image,
+        createdAt: new Date().toISOString()
+      });
+      event.target.reset();
+      persist();
+      renderBills();
+      showToast("Bill saved");
+    } catch (error) {
+      console.error(error);
+      showToast("Could not save this image");
+    }
+  });
+
+  $("#billsList").addEventListener("click", (event) => {
+    const card = event.target.closest(".bill-card");
+    if (!card) return;
+    if (event.target.classList.contains("view-bill")) openBill(card.dataset.id);
+    if (event.target.classList.contains("remove-bill")) {
+      state.bills = state.bills.filter((bill) => bill.id !== card.dataset.id);
+      state.expenses = state.expenses.map((expense) => expense.billId === card.dataset.id ? { ...expense, billId: "" } : expense);
+      persist();
+      render();
+    }
+  });
+
+  $("#clearBillsBtn").addEventListener("click", () => {
+    if (!state.bills.length) return;
+    if (!confirm("Clear all saved bill photos?")) return;
+    state.bills = [];
+    state.expenses = state.expenses.map((expense) => ({ ...expense, billId: "" }));
+    persist();
+    render();
+  });
+}
+
+bindEvents();
+render();
+persist({ silent: true });
