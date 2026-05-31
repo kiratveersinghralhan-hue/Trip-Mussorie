@@ -1,15 +1,34 @@
-const STORAGE_KEY = "tripSplit.mussoorie.clean.v1";
-const CHANNEL_NAME = "tripSplitLocalSync";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  getFirestore,
+  doc,
+  onSnapshot,
+  setDoc,
+  getDoc
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
-const defaultFriends = [
-  "Aarav",
-  "Kabir",
-  "Vivaan",
-  "Reyansh",
-  "Arjun",
-  "Dhruv",
-  "Ishaan"
-];
+const firebaseConfig = {
+  apiKey: "AIzaSyA0TPLn-m5aj6pwid9-z9OpNzyoihTx-sk",
+  authDomain: "mussorie-trip.firebaseapp.com",
+  projectId: "mussorie-trip",
+  storageBucket: "mussorie-trip.firebasestorage.app",
+  messagingSenderId: "1081829884180",
+  appId: "1:1081829884180:web:0d65738cf59dc8e6d98201",
+  measurementId: "G-J9NF5DH31T"
+};
+
+const APP_VERSION = "premium-firestore-v1";
+const DEFAULT_TRIP_CODE = "mussorie-boys-trip";
+const LOCAL_TRIP_KEY = "mussoorie.trip.code.premium";
+const LOCAL_CACHE_KEY = "mussoorie.trip.cache.premium";
+const LOCAL_SECTION_KEY = "mussoorie.trip.section.premium";
+const DEFAULT_FRIENDS = ["Aarav", "Kabir", "Vivaan", "Reyansh", "Arjun", "Dhruv", "Ishaan"];
 
 const money = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -19,618 +38,844 @@ const money = new Intl.NumberFormat("en-IN", {
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+const deviceId = getDeviceId();
 
-const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-const blankState = () => ({
-  trip: {
-    title: "Mussoorie Boys Trip",
-    destination: "Mussoorie, Uttarakhand"
-  },
-  activeTab: "dashboard",
-  friends: defaultFriends.map((name, index) => ({
-    id: makeId(),
-    name,
-    budget: 2500 + (index === 0 ? 500 : 0)
-  })),
-  expenses: [],
-  orders: [
-    {
-      id: makeId(),
-      place: "Mussoorie Cafe Stop",
-      total: 0,
-      createdAt: new Date().toISOString(),
-      items: []
-    }
-  ],
-  bills: []
-});
-
-let state = loadState();
+let app;
+let db;
+let storage;
+let tripRef;
+let unsubscribeTrip;
 let saveTimer;
 let toastTimer;
-let channel;
+let isApplyingRemote = false;
+let isRemoteReady = false;
+let activeSection = localStorage.getItem(LOCAL_SECTION_KEY) || "overview";
+let tripCode = getInitialTripCode();
+let state = loadCache() || createDefaultState();
 
-try {
-  channel = new BroadcastChannel(CHANNEL_NAME);
-  channel.onmessage = (event) => {
-    if (event.data?.type === "state-update") {
-      state = event.data.state;
+function createDefaultState() {
+  const now = new Date().toISOString();
+  return {
+    trip: {
+      title: "Mussoorie Boys Trip",
+      destination: "Mussoorie, Uttarakhand"
+    },
+    friends: DEFAULT_FRIENDS.map((name, index) => ({
+      id: makeId(),
+      name,
+      budget: index === 0 ? 3500 : 3000
+    })),
+    expenses: [],
+    orders: {
+      active: {
+        id: makeId(),
+        place: "Mall Road food stop",
+        total: 0,
+        items: [],
+        createdAt: now
+      }
+    },
+    bills: [],
+    meta: {
+      version: APP_VERSION,
+      updatedAt: now,
+      updatedBy: deviceId
+    }
+  };
+}
+
+function normalizeState(raw) {
+  const base = createDefaultState();
+  const value = raw && typeof raw === "object" ? raw : {};
+  const activeOrder = value.orders?.active || value.activeOrder || {};
+  return {
+    trip: {
+      ...base.trip,
+      ...(value.trip || {})
+    },
+    friends: normalizeFriends(value.friends, base.friends),
+    expenses: Array.isArray(value.expenses) ? value.expenses.map(normalizeExpense) : [],
+    orders: {
+      active: {
+        ...base.orders.active,
+        ...activeOrder,
+        total: Number(activeOrder.total || 0),
+        items: Array.isArray(activeOrder.items) ? activeOrder.items.map(normalizeOrderItem) : []
+      }
+    },
+    bills: Array.isArray(value.bills) ? value.bills.map(normalizeBill) : [],
+    meta: {
+      ...base.meta,
+      ...(value.meta || {})
+    }
+  };
+}
+
+function normalizeFriends(friends, fallback) {
+  const list = Array.isArray(friends) && friends.length ? friends : fallback;
+  return list.map((friend, index) => ({
+    id: friend.id || makeId(),
+    name: String(friend.name || `Friend ${index + 1}`).trim() || `Friend ${index + 1}`,
+    budget: Number(friend.budget || 0)
+  }));
+}
+
+function normalizeExpense(expense) {
+  return {
+    id: expense.id || makeId(),
+    title: String(expense.title || "Expense"),
+    amount: Number(expense.amount || 0),
+    paidBy: expense.paidBy || "",
+    note: expense.note || "",
+    billUrl: expense.billUrl || "",
+    billStoragePath: expense.billStoragePath || "",
+    createdAt: expense.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizeOrderItem(item) {
+  return {
+    id: item.id || makeId(),
+    friendId: item.friendId || "",
+    itemName: String(item.itemName || item.name || "Item"),
+    createdAt: item.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizeBill(bill) {
+  return {
+    id: bill.id || makeId(),
+    title: String(bill.title || "Bill photo"),
+    amount: Number(bill.amount || 0),
+    paidBy: bill.paidBy || "",
+    photoUrl: bill.photoUrl || bill.url || "",
+    storagePath: bill.storagePath || "",
+    createdAt: bill.createdAt || new Date().toISOString()
+  };
+}
+
+function getInitialTripCode() {
+  const params = new URLSearchParams(location.search);
+  return sanitizeTripCode(params.get("trip") || localStorage.getItem(LOCAL_TRIP_KEY) || DEFAULT_TRIP_CODE);
+}
+
+function sanitizeTripCode(value) {
+  return String(value || DEFAULT_TRIP_CODE)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 54) || DEFAULT_TRIP_CODE;
+}
+
+function getDeviceId() {
+  const key = "mussoorie.trip.device.id";
+  let value = localStorage.getItem(key);
+  if (!value) {
+    value = makeId();
+    localStorage.setItem(key, value);
+  }
+  return value;
+}
+
+function loadCache() {
+  try {
+    const cached = localStorage.getItem(LOCAL_CACHE_KEY);
+    return cached ? normalizeState(JSON.parse(cached)) : null;
+  } catch (error) {
+    console.warn("Cache load failed", error);
+    return null;
+  }
+}
+
+function saveCache() {
+  try {
+    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn("Cache save failed", error);
+  }
+}
+
+function updateUrl() {
+  localStorage.setItem(LOCAL_TRIP_KEY, tripCode);
+  const url = new URL(location.href);
+  url.searchParams.set("trip", tripCode);
+  history.replaceState({}, "", url);
+  $("#tripCodeInput").value = tripCode;
+  $("#shareLinkInput").value = url.href;
+  $("#roomNameText").textContent = `Room: ${tripCode}`;
+}
+
+function initFirebase() {
+  try {
+    app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    storage = getStorage(app);
+    connectTrip(tripCode);
+  } catch (error) {
+    console.error(error);
+    setSyncStatus("Firebase error", "error");
+    toast("Firebase config error. Check console.");
+  }
+}
+
+async function connectTrip(code) {
+  tripCode = sanitizeTripCode(code);
+  updateUrl();
+  unsubscribeTrip?.();
+  isRemoteReady = false;
+  setSyncStatus("Connecting…", "syncing");
+
+  tripRef = doc(db, "trips", tripCode);
+
+  try {
+    const snapshot = await getDoc(tripRef);
+    if (!snapshot.exists()) {
+      await writeRemote(true);
+    }
+  } catch (error) {
+    console.warn("Initial read/write failed", error);
+    setSyncStatus("Check Firestore rules", "error");
+    toast("Firestore is blocked. Enable Firestore and add rules from README.");
+  }
+
+  unsubscribeTrip = onSnapshot(tripRef, (snapshot) => {
+    isApplyingRemote = true;
+    if (snapshot.exists()) {
+      state = normalizeState(snapshot.data());
+      saveCache();
+      setSyncStatus("Live synced", "live");
+      isRemoteReady = true;
       render();
     }
-  };
-} catch (_) {
-  channel = null;
+    isApplyingRemote = false;
+  }, (error) => {
+    console.error(error);
+    setSyncStatus("Sync blocked", "error");
+    toast("Realtime sync blocked. Check Firestore rules.");
+  });
 }
 
-function loadState() {
+async function writeRemote(force = false) {
+  state.meta = {
+    ...state.meta,
+    version: APP_VERSION,
+    updatedAt: new Date().toISOString(),
+    updatedBy: deviceId
+  };
+  saveCache();
+
+  if (!tripRef) return;
+  if (!force && isApplyingRemote) return;
+
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return blankState();
-    const parsed = JSON.parse(saved);
-    if (!parsed.friends?.length) return blankState();
-    return {
-      ...blankState(),
-      ...parsed,
-      trip: { ...blankState().trip, ...(parsed.trip || {}) },
-      friends: parsed.friends || [],
-      expenses: parsed.expenses || [],
-      orders: parsed.orders?.length ? parsed.orders : blankState().orders,
-      bills: parsed.bills || []
-    };
+    await setDoc(tripRef, state, { merge: false });
+    setSyncStatus("Live synced", "live");
   } catch (error) {
-    console.warn("Could not load saved trip data", error);
-    return blankState();
+    console.error(error);
+    setSyncStatus("Sync blocked", "error");
+    toast("Could not save online. Check Firebase rules.");
   }
 }
 
-function persist({ silent = false } = {}) {
+function queueSave() {
+  render();
+  saveCache();
+  if (isApplyingRemote) return;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      channel?.postMessage({ type: "state-update", state });
-      if (!silent) showToast("Saved locally");
-    } catch (error) {
-      console.error(error);
-      showToast("Storage full. Export backup or remove old bill photos.");
-    }
-  }, 120);
+  saveTimer = setTimeout(() => writeRemote(), 420);
 }
 
-window.addEventListener("storage", (event) => {
-  if (event.key !== STORAGE_KEY || !event.newValue) return;
-  try {
-    state = JSON.parse(event.newValue);
-    render();
-  } catch (_) {}
-});
-
-function showToast(message) {
-  const toast = $("#toast");
-  toast.textContent = message;
-  toast.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove("show"), 1900);
-}
-
-function formatMoney(value) {
-  return money.format(Number(value || 0));
-}
-
-function friendById(id) {
-  return state.friends.find((friend) => friend.id === id);
-}
-
-function getActiveOrder() {
-  if (!state.orders.length) {
-    state.orders.push({ id: makeId(), place: "New food stop", total: 0, createdAt: new Date().toISOString(), items: [] });
-  }
-  return state.orders[0];
-}
-
-function totals() {
-  const totalBudget = state.friends.reduce((sum, friend) => sum + Number(friend.budget || 0), 0);
-  const totalSpent = state.expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-  const friendCount = state.friends.length;
-  return {
-    totalBudget,
-    totalSpent,
-    remaining: totalBudget - totalSpent,
-    avg: friendCount ? totalSpent / friendCount : 0
-  };
-}
-
-function calculateSettlements() {
-  const balance = new Map(state.friends.map((friend) => [friend.id, 0]));
-
-  state.expenses.forEach((expense) => {
-    const amount = Number(expense.amount || 0);
-    const splitWith = expense.splitWith?.length ? expense.splitWith : state.friends.map((friend) => friend.id);
-    if (!amount || !expense.paidBy || !splitWith.length) return;
-    balance.set(expense.paidBy, (balance.get(expense.paidBy) || 0) + amount);
-    const share = amount / splitWith.length;
-    splitWith.forEach((id) => balance.set(id, (balance.get(id) || 0) - share));
-  });
-
-  const debtors = [];
-  const creditors = [];
-  balance.forEach((value, id) => {
-    const rounded = Math.round(value);
-    if (rounded < 0) debtors.push({ id, amount: Math.abs(rounded) });
-    if (rounded > 0) creditors.push({ id, amount: rounded });
-  });
-
-  const settlements = [];
-  let d = 0;
-  let c = 0;
-  while (d < debtors.length && c < creditors.length) {
-    const pay = Math.min(debtors[d].amount, creditors[c].amount);
-    if (pay > 0) {
-      settlements.push({ from: debtors[d].id, to: creditors[c].id, amount: pay });
-    }
-    debtors[d].amount -= pay;
-    creditors[c].amount -= pay;
-    if (debtors[d].amount <= 0) d += 1;
-    if (creditors[c].amount <= 0) c += 1;
-  }
-  return settlements;
+function setSyncStatus(text, mode) {
+  const pill = $("#syncStatus");
+  if (!pill) return;
+  pill.textContent = text;
+  pill.className = `sync-pill ${mode || "syncing"}`;
 }
 
 function render() {
-  renderTripHeader();
-  renderTabs();
-  renderFriendOptions();
-  renderDashboard();
+  renderStaticFields();
+  renderSections();
+  renderMetrics();
+  renderSelects();
   renderFriends();
   renderExpenses();
   renderOrders();
   renderBills();
+  renderShareLink();
 }
 
-function renderTripHeader() {
-  $("#tripTitle").textContent = state.trip.title;
-  $("#tripDestination").textContent = state.trip.destination;
+function renderStaticFields() {
+  if (document.activeElement !== $("#tripTitle")) $("#tripTitle").textContent = state.trip.title || "Mussoorie Boys Trip";
+  if (document.activeElement !== $("#tripDestination")) $("#tripDestination").textContent = state.trip.destination || "Mussoorie, Uttarakhand";
+  if (document.activeElement !== $("#orderPlace")) $("#orderPlace").value = state.orders.active.place || "";
+  if (document.activeElement !== $("#orderTotal")) $("#orderTotal").value = state.orders.active.total || "";
+  updateUrl();
 }
 
-function renderTabs() {
-  $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === state.activeTab));
-  $$(".panel").forEach((panel) => panel.classList.remove("active"));
-  $(`#${state.activeTab}Panel`)?.classList.add("active");
+function renderSections() {
+  $$(".section").forEach((section) => {
+    section.classList.toggle("active", section.dataset.section === activeSection);
+  });
+  $$(".bottom-nav button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.nav === activeSection);
+  });
+  localStorage.setItem(LOCAL_SECTION_KEY, activeSection);
 }
 
-function renderFriendOptions() {
-  const options = state.friends.map((friend) => `<option value="${friend.id}">${escapeHtml(friend.name)}</option>`).join("");
+function renderMetrics() {
+  const totalBudget = sum(state.friends.map((friend) => friend.budget));
+  const totalSpent = sum(state.expenses.map((expense) => expense.amount));
+  const balance = totalBudget - totalSpent;
+  const itemCount = state.orders.active.items.length;
+  const peopleCount = uniqueOrderPeople().length;
+
+  $("#totalBudget").textContent = money.format(totalBudget);
+  $("#totalSpent").textContent = money.format(totalSpent);
+  $("#balanceAmount").textContent = money.format(balance);
+  $("#friendCountText").textContent = `${state.friends.length} friends`;
+  $("#expenseCountText").textContent = `${state.expenses.length} expenses`;
+  $("#billCountText").textContent = String(state.bills.length);
+  $("#balanceHint").textContent = balance >= 0 ? "Still in budget" : "Over budget";
+  $("#orderPeopleCount").textContent = String(peopleCount);
+  $("#orderItemsCount").textContent = String(itemCount);
+  $("#latestUpdateText").textContent = relativeTime(state.meta.updatedAt);
+}
+
+function renderSelects() {
+  const options = state.friends.map((friend) => `<option value="${escapeHtml(friend.id)}">${escapeHtml(friend.name)}</option>`).join("");
+  const optionalOptions = `<option value="">Not selected</option>${options}`;
+
   ["#quickExpensePaidBy", "#expensePaidBy", "#orderFriend"].forEach((selector) => {
-    const element = $(selector);
-    const current = element.value;
-    element.innerHTML = options;
-    if (state.friends.some((friend) => friend.id === current)) element.value = current;
+    const select = $(selector);
+    const current = select.value;
+    select.innerHTML = options;
+    if (state.friends.some((friend) => friend.id === current)) select.value = current;
   });
 
-  const split = $("#splitWithList");
-  split.innerHTML = state.friends.map((friend) => `
-    <label class="check-pill">
-      <input type="checkbox" value="${friend.id}" checked />
-      ${escapeHtml(friend.name)}
-    </label>
-  `).join("");
-}
-
-function renderDashboard() {
-  const tripTotals = totals();
-  $("#totalBudget").textContent = formatMoney(tripTotals.totalBudget);
-  $("#totalSpent").textContent = formatMoney(tripTotals.totalSpent);
-  $("#remainingBudget").textContent = formatMoney(tripTotals.remaining);
-  $("#perPersonAvg").textContent = formatMoney(tripTotals.avg);
-  $("#friendCountText").textContent = `${state.friends.length} friends`;
-  $("#remainingHint").textContent = tripTotals.remaining >= 0 ? "Safe to spend" : "Over budget";
-
-  const settlements = calculateSettlements();
-  const list = $("#settlementList");
-  list.innerHTML = settlements.map((item) => {
-    const from = friendById(item.from)?.name || "Someone";
-    const to = friendById(item.to)?.name || "Someone";
-    return `
-      <div class="list-item">
-        <div class="item-top">
-          <div>
-            <div class="item-title">${escapeHtml(from)} → ${escapeHtml(to)}</div>
-            <div class="item-meta">Final settlement</div>
-          </div>
-          <div class="money">${formatMoney(item.amount)}</div>
-        </div>
-      </div>
-    `;
-  }).join("");
+  const billPaidBy = $("#billPaidBy");
+  const billCurrent = billPaidBy.value;
+  billPaidBy.innerHTML = optionalOptions;
+  if (state.friends.some((friend) => friend.id === billCurrent)) billPaidBy.value = billCurrent;
 }
 
 function renderFriends() {
-  const list = $("#friendsList");
-  list.innerHTML = state.friends.map((friend, index) => `
-    <article class="friend-card" data-id="${friend.id}">
-      <div class="friend-top">
-        <div class="avatar">${escapeHtml(friend.name.charAt(0) || "F")}</div>
-        <button class="icon-btn remove-friend" title="Remove friend" type="button">×</button>
+  const container = $("#friendsList");
+  container.innerHTML = state.friends.map((friend, index) => `
+    <article class="friend-card" data-id="${escapeHtml(friend.id)}">
+      <div class="avatar-row">
+        <span class="avatar">${escapeHtml(initials(friend.name))}</span>
+        <div>
+          <label>
+            <span>Name</span>
+            <input class="friend-name" value="${escapeAttr(friend.name)}" aria-label="Friend name ${index + 1}" />
+          </label>
+        </div>
       </div>
       <label>
-        Name
-        <input class="friend-name" value="${escapeAttr(friend.name)}" />
+        <span>Budget</span>
+        <input class="friend-budget" type="number" min="0" step="1" value="${Number(friend.budget || 0)}" aria-label="Budget for ${escapeAttr(friend.name)}" />
       </label>
-      <label style="margin-top: 12px;">
-        Budget
-        <input class="friend-budget" type="number" min="0" step="1" value="${Number(friend.budget || 0)}" />
-      </label>
-      <p class="item-meta" style="margin-top: 12px;">Friend ${index + 1}</p>
+      <div class="friend-actions">
+        <button class="tiny-btn delete remove-friend" type="button">Remove</button>
+      </div>
     </article>
   `).join("");
+
+  container.querySelectorAll(".friend-card").forEach((card) => {
+    const friend = state.friends.find((item) => item.id === card.dataset.id);
+    card.querySelector(".friend-name").addEventListener("input", (event) => {
+      friend.name = event.target.value || "Friend";
+      queueSave();
+    });
+    card.querySelector(".friend-budget").addEventListener("input", (event) => {
+      friend.budget = Number(event.target.value || 0);
+      queueSave();
+    });
+    card.querySelector(".remove-friend").addEventListener("click", () => removeFriend(friend.id));
+  });
 }
 
 function renderExpenses() {
   const list = $("#expensesList");
-  list.innerHTML = state.expenses.slice().reverse().map((expense) => {
-    const paidBy = friendById(expense.paidBy)?.name || "Unknown";
-    const splitNames = (expense.splitWith || []).map((id) => friendById(id)?.name).filter(Boolean);
-    const bill = expense.billId ? state.bills.find((item) => item.id === expense.billId) : null;
+  $("#expenseCountPill").textContent = String(state.expenses.length);
+  if (!state.expenses.length) {
+    list.innerHTML = `<div class="empty-state">No expenses yet.<br>Add petrol, hotel, snacks or tickets.</div>`;
+    return;
+  }
+
+  list.innerHTML = state.expenses.slice().sort(byNewest).map((expense) => {
+    const paidBy = friendName(expense.paidBy) || "Not selected";
+    const billButton = expense.billUrl ? `<a class="tiny-btn" href="${escapeAttr(expense.billUrl)}" target="_blank" rel="noopener">Bill</a>` : "";
     return `
-      <div class="list-item" data-id="${expense.id}">
+      <article class="item-card">
         <div class="item-top">
           <div>
-            <div class="item-title">${escapeHtml(expense.title)}</div>
-            <div class="item-meta">Paid by ${escapeHtml(paidBy)} · Split ${splitNames.length ? `between ${escapeHtml(splitNames.join(", "))}` : "equally"}</div>
+            <strong>${escapeHtml(expense.title)}</strong>
+            <div class="item-meta">${escapeHtml(paidBy)} • ${formatDate(expense.createdAt)}</div>
+            ${expense.note ? `<div class="item-meta">${escapeHtml(expense.note)}</div>` : ""}
           </div>
-          <div class="money">${formatMoney(expense.amount)}</div>
+          <span class="amount">${money.format(expense.amount)}</span>
         </div>
-        <div class="item-top">
-          ${bill ? `<button class="receipt-link open-bill" data-bill="${bill.id}" type="button">📸 View bill</button>` : `<span class="item-meta">No bill attached</span>`}
-          <button class="icon-btn remove-expense" title="Delete expense" type="button">×</button>
+        <div class="item-actions">
+          ${billButton}
+          <button class="tiny-btn delete" data-delete-expense="${escapeAttr(expense.id)}" type="button">Delete</button>
         </div>
-      </div>
+      </article>
     `;
   }).join("");
+
+  list.querySelectorAll("[data-delete-expense]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.expenses = state.expenses.filter((expense) => expense.id !== button.dataset.deleteExpense);
+      queueSave();
+    });
+  });
 }
 
 function renderOrders() {
-  const order = getActiveOrder();
-  $("#orderPlace").value = order.place || "";
-  $("#orderTotal").value = order.total || "";
-  $("#orderTitle").textContent = order.place || "Current order";
-
-  const orderers = [...new Set(order.items.map((item) => item.friendId))];
-  const split = Number(order.total || 0) && orderers.length ? Number(order.total) / orderers.length : 0;
-  $("#orderSplitText").textContent = orderers.length
-    ? `${orderers.length} people ordered${split ? ` · ${formatMoney(split)} each` : ""}`
-    : "Add item names from friends.";
-
+  const order = state.orders.active;
   const list = $("#orderItemsList");
-  list.innerHTML = order.items.map((item) => {
-    const friend = friendById(item.friendId)?.name || "Friend";
-    return `
-      <div class="list-item" data-id="${item.id}">
-        <div class="item-top">
-          <div>
-            <div class="item-title">${escapeHtml(item.name)}</div>
-            <div class="item-meta">${escapeHtml(friend)}</div>
-          </div>
-          <button class="icon-btn remove-order-item" title="Remove item" type="button">×</button>
+  const items = order.items || [];
+  const people = uniqueOrderPeople();
+  const split = people.length ? Number(order.total || 0) / people.length : 0;
+
+  $("#orderCountPill").textContent = String(items.length);
+  $("#orderSplitAmount").textContent = money.format(split);
+  $("#orderSplitHint").textContent = people.length ? `${people.length} people in this order` : "Add orders first";
+
+  if (!items.length) {
+    list.innerHTML = `<div class="empty-state">No food items yet.<br>Friends can add Maggi, momos, drinks, anything.</div>`;
+    return;
+  }
+
+  list.innerHTML = items.slice().sort(byOldest).map((item) => `
+    <article class="item-card">
+      <div class="item-top">
+        <div>
+          <strong>${escapeHtml(item.itemName)}</strong>
+          <div class="item-meta">${escapeHtml(friendName(item.friendId) || "Friend")} • ${formatDate(item.createdAt)}</div>
         </div>
+        <button class="tiny-btn delete" data-delete-order-item="${escapeAttr(item.id)}" type="button">Delete</button>
       </div>
-    `;
-  }).join("");
+    </article>
+  `).join("");
+
+  list.querySelectorAll("[data-delete-order-item]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.orders.active.items = state.orders.active.items.filter((item) => item.id !== button.dataset.deleteOrderItem);
+      queueSave();
+    });
+  });
 }
 
 function renderBills() {
-  const list = $("#billsList");
-  list.innerHTML = state.bills.slice().reverse().map((bill) => `
-    <article class="bill-card" data-id="${bill.id}">
-      <img src="${bill.image}" alt="${escapeAttr(bill.title)}" loading="lazy" />
-      <div class="bill-body">
+  const gallery = $("#billGallery");
+  $("#billCountPill").textContent = String(state.bills.length);
+  if (!state.bills.length) {
+    gallery.innerHTML = `<div class="empty-state">No bill photos yet.<br>Upload directly from phone camera.</div>`;
+    return;
+  }
+
+  gallery.innerHTML = state.bills.slice().sort(byNewest).map((bill) => `
+    <article class="bill-card">
+      <a href="${escapeAttr(bill.photoUrl)}" target="_blank" rel="noopener">
+        <img src="${escapeAttr(bill.photoUrl)}" alt="${escapeAttr(bill.title)}" loading="lazy" />
+      </a>
+      <div class="bill-info">
         <strong>${escapeHtml(bill.title)}</strong>
-        <div class="item-meta">${bill.amount ? formatMoney(bill.amount) : "Amount not added"}</div>
-        <div class="bill-actions">
-          <button class="secondary-btn small view-bill" type="button">View</button>
-          <button class="danger-btn small remove-bill" type="button">Delete</button>
+        <p>${bill.amount ? money.format(bill.amount) + " • " : ""}${escapeHtml(friendName(bill.paidBy) || "No payer")}<br>${formatDate(bill.createdAt)}</p>
+        <div class="item-actions">
+          <button class="tiny-btn delete" data-delete-bill="${escapeAttr(bill.id)}" type="button">Delete</button>
         </div>
       </div>
     </article>
   `).join("");
-}
 
-async function addExpenseFromForm({ titleInput, amountInput, paidByInput, fileInput, splitIds }) {
-  const title = titleInput.value.trim();
-  const amount = Number(amountInput.value);
-  const paidBy = paidByInput.value;
-  if (!title || !amount || !paidBy) return;
-
-  let billId = "";
-  const file = fileInput?.files?.[0];
-  if (file) {
-    const image = await compressImage(file);
-    const bill = {
-      id: makeId(),
-      title: `${title} bill`,
-      amount,
-      image,
-      createdAt: new Date().toISOString()
-    };
-    state.bills.push(bill);
-    billId = bill.id;
-    fileInput.value = "";
-  }
-
-  state.expenses.push({
-    id: makeId(),
-    title,
-    amount,
-    paidBy,
-    splitWith: splitIds?.length ? splitIds : state.friends.map((friend) => friend.id),
-    billId,
-    createdAt: new Date().toISOString()
-  });
-  titleInput.value = "";
-  amountInput.value = "";
-  persist();
-  render();
-}
-
-async function compressImage(file) {
-  const dataUrl = await fileToDataUrl(file);
-  const image = await loadImage(dataUrl);
-  const maxSize = 1400;
-  const ratio = Math.min(maxSize / image.width, maxSize / image.height, 1);
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(image.width * ratio);
-  canvas.height = Math.round(image.height * ratio);
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.74);
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+  gallery.querySelectorAll("[data-delete-bill]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.bills = state.bills.filter((bill) => bill.id !== button.dataset.deleteBill);
+      queueSave();
+    });
   });
 }
 
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = reject;
-    image.src = src;
-  });
-}
-
-function openBill(id) {
-  const bill = state.bills.find((item) => item.id === id);
-  if (!bill) return;
-  const win = window.open("", "_blank");
-  if (!win) {
-    showToast("Popup blocked. Allow popups to view bill.");
-    return;
-  }
-  win.document.write(`
-    <!DOCTYPE html>
-    <html><head><title>${escapeHtml(bill.title)}</title><meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>body{margin:0;font-family:system-ui;background:#111;color:#fff;display:grid;gap:14px;place-items:center;min-height:100vh;padding:18px}img{max-width:min(100%,900px);max-height:82vh;border-radius:18px;background:#222}h1{font-size:20px;margin:0}.meta{opacity:.75}</style>
-    </head><body><h1>${escapeHtml(bill.title)}</h1><div class="meta">${bill.amount ? formatMoney(bill.amount) : "Bill photo"}</div><img src="${bill.image}" alt="${escapeAttr(bill.title)}" /></body></html>
-  `);
-  win.document.close();
-}
-
-function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "mussoorie-trip-backup.json";
-  link.click();
-  URL.revokeObjectURL(link.href);
-  showToast("Backup exported");
-}
-
-function escapeHtml(value = "") {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function escapeAttr(value = "") {
-  return escapeHtml(value).replaceAll("`", "&#096;");
+function renderShareLink() {
+  const url = new URL(location.href);
+  url.searchParams.set("trip", tripCode);
+  $("#shareLinkInput").value = url.href;
 }
 
 function bindEvents() {
-  $$(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      state.activeTab = tab.dataset.tab;
-      persist({ silent: true });
-      renderTabs();
-    });
+  $$(".bottom-nav button").forEach((button) => {
+    button.addEventListener("click", () => showSection(button.dataset.nav));
   });
 
-  $("#tripTitle").addEventListener("blur", (event) => {
+  $("#heroExpenseBtn").addEventListener("click", () => {
+    showSection("overview");
+    $("#quickExpenseTitle").focus();
+  });
+  $("#heroBillBtn").addEventListener("click", () => showSection("bills"));
+
+  $("#tripTitle").addEventListener("input", (event) => {
     state.trip.title = event.target.textContent.trim() || "Mussoorie Boys Trip";
-    persist();
+    queueSave();
   });
-
-  $("#tripDestination").addEventListener("blur", (event) => {
+  $("#tripDestination").addEventListener("input", (event) => {
     state.trip.destination = event.target.textContent.trim() || "Mussoorie, Uttarakhand";
-    persist();
+    queueSave();
   });
 
-  $("#exportBtn").addEventListener("click", exportData);
+  $("#joinTripBtn").addEventListener("click", () => connectTrip($("#tripCodeInput").value));
+  $("#tripCodeInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") connectTrip(event.target.value);
+  });
+  ["#copyLinkBtn", "#copyLinkBtn2"].forEach((selector) => {
+    $(selector).addEventListener("click", copyFriendLink);
+  });
 
   $("#addFriendBtn").addEventListener("click", () => {
-    state.friends.push({ id: makeId(), name: `Friend ${state.friends.length + 1}`, budget: 2500 });
-    persist();
-    render();
-  });
-
-  $("#friendsList").addEventListener("input", (event) => {
-    const card = event.target.closest(".friend-card");
-    if (!card) return;
-    const friend = friendById(card.dataset.id);
-    if (!friend) return;
-    if (event.target.classList.contains("friend-name")) friend.name = event.target.value;
-    if (event.target.classList.contains("friend-budget")) friend.budget = Number(event.target.value || 0);
-    persist({ silent: true });
-    renderFriendOptions();
-    renderDashboard();
-  });
-
-  $("#friendsList").addEventListener("click", (event) => {
-    if (!event.target.classList.contains("remove-friend")) return;
-    const card = event.target.closest(".friend-card");
-    if (state.friends.length <= 1) {
-      showToast("Keep at least one friend");
-      return;
-    }
-    const id = card.dataset.id;
-    state.friends = state.friends.filter((friend) => friend.id !== id);
-    state.expenses = state.expenses.map((expense) => ({
-      ...expense,
-      splitWith: (expense.splitWith || []).filter((friendId) => friendId !== id)
-    })).filter((expense) => expense.paidBy !== id);
-    state.orders.forEach((order) => {
-      order.items = order.items.filter((item) => item.friendId !== id);
-    });
-    persist();
-    render();
+    state.friends.push({ id: makeId(), name: `Friend ${state.friends.length + 1}`, budget: 3000 });
+    queueSave();
+    toast("Friend added");
   });
 
   $("#quickExpenseForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await addExpenseFromForm({
-      titleInput: $("#quickExpenseTitle"),
-      amountInput: $("#quickExpenseAmount"),
-      paidByInput: $("#quickExpensePaidBy"),
-      fileInput: $("#quickExpenseBill"),
-      splitIds: state.friends.map((friend) => friend.id)
+      title: $("#quickExpenseTitle").value,
+      amount: $("#quickExpenseAmount").value,
+      paidBy: $("#quickExpensePaidBy").value,
+      note: "",
+      file: $("#quickExpenseBill").files[0]
     });
+    event.target.reset();
+    renderSelects();
   });
 
   $("#expenseForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const splitIds = $$("#splitWithList input:checked").map((input) => input.value);
     await addExpenseFromForm({
-      titleInput: $("#expenseTitle"),
-      amountInput: $("#expenseAmount"),
-      paidByInput: $("#expensePaidBy"),
-      fileInput: $("#expenseBill"),
-      splitIds
+      title: $("#expenseTitle").value,
+      amount: $("#expenseAmount").value,
+      paidBy: $("#expensePaidBy").value,
+      note: $("#expenseNote").value,
+      file: $("#expenseBill").files[0]
     });
+    event.target.reset();
+    renderSelects();
   });
 
   $("#clearExpensesBtn").addEventListener("click", () => {
     if (!state.expenses.length) return;
-    if (!confirm("Clear all expenses?")) return;
-    state.expenses = [];
-    persist();
-    render();
-  });
-
-  $("#expensesList").addEventListener("click", (event) => {
-    const row = event.target.closest(".list-item");
-    if (!row) return;
-    if (event.target.classList.contains("remove-expense")) {
-      state.expenses = state.expenses.filter((expense) => expense.id !== row.dataset.id);
-      persist();
-      render();
+    if (confirm("Clear all expenses from this trip?")) {
+      state.expenses = [];
+      queueSave();
+      toast("Expenses cleared");
     }
-    if (event.target.classList.contains("open-bill")) {
-      openBill(event.target.dataset.bill);
-    }
-  });
-
-  $("#newOrderBtn").addEventListener("click", () => {
-    state.orders.unshift({ id: makeId(), place: "New food stop", total: 0, createdAt: new Date().toISOString(), items: [] });
-    persist();
-    render();
-    showToast("New order started");
   });
 
   $("#orderPlace").addEventListener("input", (event) => {
-    getActiveOrder().place = event.target.value;
-    persist({ silent: true });
-    $("#orderTitle").textContent = event.target.value || "Current order";
+    state.orders.active.place = event.target.value;
+    queueSave();
   });
-
-  $("#addOrderItemBtn").addEventListener("click", () => {
-    const name = $("#orderItem").value.trim();
-    const friendId = $("#orderFriend").value;
-    if (!name || !friendId) return;
-    getActiveOrder().items.push({ id: makeId(), friendId, name, createdAt: new Date().toISOString() });
-    $("#orderItem").value = "";
-    persist();
-    renderOrders();
+  $("#orderTotal").addEventListener("input", (event) => {
+    state.orders.active.total = Number(event.target.value || 0);
+    queueSave();
   });
-
-  $("#saveOrderTotalBtn").addEventListener("click", () => {
-    getActiveOrder().total = Number($("#orderTotal").value || 0);
-    persist();
-    renderOrders();
+  $("#orderItemForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.orders.active.items.push({
+      id: makeId(),
+      friendId: $("#orderFriend").value,
+      itemName: $("#orderItemName").value.trim(),
+      createdAt: new Date().toISOString()
+    });
+    $("#orderItemName").value = "";
+    queueSave();
+    toast("Order item added");
   });
-
-  $("#orderItemsList").addEventListener("click", (event) => {
-    if (!event.target.classList.contains("remove-order-item")) return;
-    const id = event.target.closest(".list-item").dataset.id;
-    const order = getActiveOrder();
-    order.items = order.items.filter((item) => item.id !== id);
-    persist();
-    renderOrders();
+  $("#newOrderBtn").addEventListener("click", () => {
+    if (state.orders.active.items.length && !confirm("Start a new food stop and clear current order items?")) return;
+    state.orders.active = {
+      id: makeId(),
+      place: "New food stop",
+      total: 0,
+      items: [],
+      createdAt: new Date().toISOString()
+    };
+    queueSave();
+    toast("New food stop ready");
   });
 
   $("#billForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const file = $("#billPhoto").files?.[0];
-    const title = $("#billTitle").value.trim();
-    if (!file || !title) return;
-    try {
-      const image = await compressImage(file);
-      state.bills.push({
-        id: makeId(),
-        title,
-        amount: Number($("#billAmount").value || 0),
-        image,
-        createdAt: new Date().toISOString()
-      });
-      event.target.reset();
-      persist();
-      renderBills();
-      showToast("Bill saved");
-    } catch (error) {
-      console.error(error);
-      showToast("Could not save this image");
-    }
+    const file = $("#billPhoto").files[0];
+    if (!file) return toast("Choose a bill photo first");
+    await addBillPhoto({
+      title: $("#billTitle").value,
+      amount: $("#billAmount").value,
+      paidBy: $("#billPaidBy").value,
+      file
+    });
+    event.target.reset();
+    renderSelects();
   });
 
-  $("#billsList").addEventListener("click", (event) => {
-    const card = event.target.closest(".bill-card");
-    if (!card) return;
-    if (event.target.classList.contains("view-bill")) openBill(card.dataset.id);
-    if (event.target.classList.contains("remove-bill")) {
-      state.bills = state.bills.filter((bill) => bill.id !== card.dataset.id);
-      state.expenses = state.expenses.map((expense) => expense.billId === card.dataset.id ? { ...expense, billId: "" } : expense);
-      persist();
-      render();
+  $("#exportBtn").addEventListener("click", exportBackup);
+  $("#resetTripBtn").addEventListener("click", () => {
+    if (confirm("Reset this trip room for everyone using this code?")) {
+      state = createDefaultState();
+      queueSave();
+      toast("Trip reset");
     }
-  });
-
-  $("#clearBillsBtn").addEventListener("click", () => {
-    if (!state.bills.length) return;
-    if (!confirm("Clear all saved bill photos?")) return;
-    state.bills = [];
-    state.expenses = state.expenses.map((expense) => ({ ...expense, billId: "" }));
-    persist();
-    render();
   });
 }
 
-bindEvents();
-render();
-persist({ silent: true });
+function showSection(section) {
+  activeSection = section;
+  renderSections();
+  const target = $(`#${section}Section`);
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function addExpenseFromForm({ title, amount, paidBy, note, file }) {
+  const trimmedTitle = String(title || "").trim();
+  const numericAmount = Number(amount || 0);
+  if (!trimmedTitle || numericAmount <= 0) return toast("Add expense title and amount");
+
+  const expense = {
+    id: makeId(),
+    title: trimmedTitle,
+    amount: numericAmount,
+    paidBy,
+    note: String(note || "").trim(),
+    billUrl: "",
+    billStoragePath: "",
+    createdAt: new Date().toISOString()
+  };
+
+  if (file) {
+    const upload = await uploadPhoto(file, "expense-bills");
+    if (upload?.url) {
+      expense.billUrl = upload.url;
+      expense.billStoragePath = upload.path || "";
+    }
+  }
+
+  state.expenses.push(expense);
+  queueSave();
+  toast("Expense saved");
+}
+
+async function addBillPhoto({ title, amount, paidBy, file }) {
+  const trimmedTitle = String(title || "").trim();
+  if (!trimmedTitle) return toast("Add a bill name");
+  setUploadBusy(true);
+  try {
+    const upload = await uploadPhoto(file, "bill-photos");
+    if (!upload?.url) return;
+    state.bills.push({
+      id: makeId(),
+      title: trimmedTitle,
+      amount: Number(amount || 0),
+      paidBy,
+      photoUrl: upload.url,
+      storagePath: upload.path || "",
+      createdAt: new Date().toISOString()
+    });
+    queueSave();
+    toast("Bill photo uploaded");
+  } finally {
+    setUploadBusy(false);
+  }
+}
+
+function setUploadBusy(isBusy) {
+  const button = $("#billForm button[type='submit']");
+  button.disabled = isBusy;
+  button.textContent = isBusy ? "Uploading…" : "Save bill";
+}
+
+async function uploadPhoto(file, folder) {
+  if (!file.type.startsWith("image/")) {
+    toast("Please upload an image file");
+    return null;
+  }
+
+  try {
+    toast("Compressing photo…");
+    const blob = await compressImage(file);
+    const safeName = file.name.replace(/[^a-z0-9.\-_]/gi, "-").toLowerCase();
+    const path = `trip-bills/${tripCode}/${folder}/${Date.now()}-${safeName || "bill.jpg"}`;
+    const ref = storageRef(storage, path);
+    await uploadBytes(ref, blob, { contentType: "image/jpeg" });
+    const url = await getDownloadURL(ref);
+    return { url, path };
+  } catch (error) {
+    console.warn("Storage upload failed, trying small local fallback", error);
+    try {
+      const dataUrl = await compressImageToDataUrl(file, 760, 0.55);
+      if (dataUrl.length < 850000) {
+        toast("Storage blocked, saved compressed photo in Firestore instead");
+        return { url: dataUrl, path: "firestore-data-url" };
+      }
+    } catch (fallbackError) {
+      console.warn("Fallback image failed", fallbackError);
+    }
+    toast("Photo upload blocked. Check Firebase Storage rules.");
+    return null;
+  }
+}
+
+function compressImage(file, maxSize = 1180, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read image"));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("Could not load image"));
+      image.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Compression failed"));
+        }, "image/jpeg", quality);
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function compressImageToDataUrl(file, maxSize, quality) {
+  const blob = await compressImage(file, maxSize, quality);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not create data URL"));
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function removeFriend(id) {
+  if (state.friends.length <= 1) return toast("Keep at least one friend");
+  state.friends = state.friends.filter((friend) => friend.id !== id);
+  state.expenses = state.expenses.map((expense) => expense.paidBy === id ? { ...expense, paidBy: "" } : expense);
+  state.orders.active.items = state.orders.active.items.filter((item) => item.friendId !== id);
+  state.bills = state.bills.map((bill) => bill.paidBy === id ? { ...bill, paidBy: "" } : bill);
+  queueSave();
+  toast("Friend removed");
+}
+
+function uniqueOrderPeople() {
+  return [...new Set((state.orders.active.items || []).map((item) => item.friendId).filter(Boolean))];
+}
+
+function friendName(id) {
+  return state.friends.find((friend) => friend.id === id)?.name || "";
+}
+
+function sum(numbers) {
+  return numbers.reduce((total, value) => total + Number(value || 0), 0);
+}
+
+function byNewest(a, b) {
+  return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+}
+
+function byOldest(a, b) {
+  return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+}
+
+function initials(name) {
+  return String(name || "F")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "F";
+}
+
+function formatDate(value) {
+  try {
+    return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  } catch (_) {
+    return "Now";
+  }
+}
+
+function relativeTime(value) {
+  if (!value) return "Now";
+  const diff = Date.now() - new Date(value).getTime();
+  if (Number.isNaN(diff) || diff < 45000) return "Now";
+  const mins = Math.round(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
+}
+
+async function copyFriendLink() {
+  const url = new URL(location.href);
+  url.searchParams.set("trip", tripCode);
+  try {
+    await navigator.clipboard.writeText(url.href);
+    toast("Friend link copied");
+  } catch (_) {
+    $("#shareLinkInput").select();
+    document.execCommand("copy");
+    toast("Friend link copied");
+  }
+}
+
+function exportBackup() {
+  const payload = JSON.stringify(state, null, 2);
+  const blob = new Blob([payload], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${tripCode}-backup.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  toast("Backup downloaded");
+}
+
+function toast(message) {
+  const element = $("#toast");
+  element.textContent = message;
+  element.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => element.classList.remove("show"), 2600);
+}
+
+function boot() {
+  bindEvents();
+  render();
+  initFirebase();
+  setInterval(() => renderMetrics(), 60000);
+}
+
+boot();

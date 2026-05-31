@@ -4,263 +4,331 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mussoorie Boys Trip</title>
-  <meta name="description" content="A clean local trip budget, expenses, order and bill tracker for a Mussoorie boys trip." />
-  <meta name="theme-color" content="#101827" />
+  <meta name="description" content="Premium realtime Mussoorie boys trip dashboard for friends, budgets, expenses, restaurant orders and bill photos." />
+  <meta name="theme-color" content="#10241f" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div class="aurora aurora-one"></div>
+  <div class="aurora aurora-two"></div>
+
   <div class="app-shell">
-    <header class="hero">
-      <nav class="topbar" aria-label="Main">
-        <div class="brand">
-          <span class="brand-mark">🏔️</span>
-          <span>TripSplit</span>
+    <header class="hero-card glass">
+      <nav class="topbar" aria-label="Top navigation">
+        <a class="brand" href="#overview" aria-label="Mussoorie Boys Trip Home">
+          <span class="brand-badge">🏔️</span>
+          <span>
+            <strong>TripMitra</strong>
+            <small>Mussoorie</small>
+          </span>
+        </a>
+        <div class="top-actions">
+          <span class="sync-pill syncing" id="syncStatus">Connecting…</span>
+          <button class="icon-btn" id="copyLinkBtn" type="button" title="Copy friend link">🔗</button>
         </div>
-        <button class="ghost-btn" id="exportBtn" type="button">Export</button>
       </nav>
 
-      <div class="hero-grid">
-        <div>
-          <p class="eyebrow">Boys trip planner</p>
-          <h1 contenteditable="true" id="tripTitle" spellcheck="false">Mussoorie Boys Trip</h1>
-          <p class="subtitle">Keep budgets, expenses, food orders and bill photos in one clean local dashboard.</p>
+      <section class="hero-grid" aria-label="Trip overview">
+        <div class="hero-copy">
+          <p class="eyebrow">Boys trip control room</p>
+          <h1 contenteditable="true" spellcheck="false" id="tripTitle">Mussoorie Boys Trip</h1>
+          <p class="subtitle">One clean link for budgets, expenses, food orders and bill photos. Everyone sees updates live.</p>
+          <div class="hero-actions">
+            <button class="primary-btn" id="heroExpenseBtn" type="button">+ Add expense</button>
+            <button class="ghost-btn" id="heroBillBtn" type="button">Upload bill</button>
+          </div>
         </div>
-        <div class="hero-card">
-          <span class="muted-label">Destination</span>
-          <strong contenteditable="true" id="tripDestination" spellcheck="false">Mussoorie, Uttarakhand</strong>
-          <div class="mini-line"></div>
-          <span class="muted-label">Local only</span>
-          <strong>Saved on this device</strong>
-        </div>
-      </div>
+
+        <aside class="trip-chip-panel" aria-label="Trip details">
+          <div class="detail-card">
+            <span>Destination</span>
+            <strong contenteditable="true" spellcheck="false" id="tripDestination">Mussoorie, Uttarakhand</strong>
+          </div>
+          <div class="detail-card join-card">
+            <span>Shared trip code</span>
+            <div class="join-row">
+              <input id="tripCodeInput" type="text" inputmode="text" autocomplete="off" aria-label="Trip code" />
+              <button class="secondary-btn small" id="joinTripBtn" type="button">Join</button>
+            </div>
+          </div>
+        </aside>
+      </section>
     </header>
 
     <main>
-      <section class="tabs" aria-label="Sections">
-        <button class="tab active" data-tab="dashboard" type="button">Overview</button>
-        <button class="tab" data-tab="friends" type="button">Friends</button>
-        <button class="tab" data-tab="expenses" type="button">Expenses</button>
-        <button class="tab" data-tab="orders" type="button">Orders</button>
-        <button class="tab" data-tab="bills" type="button">Bills</button>
-      </section>
-
-      <section class="panel active" id="dashboardPanel">
-        <div class="summary-grid">
-          <article class="metric-card main-metric">
+      <section class="section active" id="overviewSection" data-section="overview">
+        <div class="metric-grid">
+          <article class="metric-card featured">
             <span>Total Budget</span>
             <strong id="totalBudget">₹0</strong>
-            <p id="friendCountText">0 friends</p>
+            <small id="friendCountText">0 friends</small>
           </article>
           <article class="metric-card">
-            <span>Total Spent</span>
+            <span>Spent</span>
             <strong id="totalSpent">₹0</strong>
-            <p>All expenses added</p>
+            <small id="expenseCountText">0 expenses</small>
           </article>
           <article class="metric-card">
-            <span>Remaining</span>
-            <strong id="remainingBudget">₹0</strong>
-            <p id="remainingHint">Safe to spend</p>
+            <span>Balance</span>
+            <strong id="balanceAmount">₹0</strong>
+            <small id="balanceHint">Ready for the hills</small>
           </article>
           <article class="metric-card">
-            <span>Per Person Avg.</span>
-            <strong id="perPersonAvg">₹0</strong>
-            <p>Expense split average</p>
+            <span>Bills</span>
+            <strong id="billCountText">0</strong>
+            <small>photos saved</small>
           </article>
         </div>
 
-        <div class="two-col">
-          <article class="card">
+        <div class="content-grid">
+          <article class="panel-card quick-card" id="quickExpenseCard">
             <div class="section-head">
               <div>
-                <p class="eyebrow">Quick add</p>
+                <p class="eyebrow">Quick entry</p>
                 <h2>Add expense</h2>
               </div>
             </div>
-            <form class="clean-form" id="quickExpenseForm">
+            <form id="quickExpenseForm" class="form-stack">
               <label>
-                Expense name
-                <input id="quickExpenseTitle" type="text" placeholder="Hotel advance, petrol, snacks..." required />
+                <span>Expense</span>
+                <input id="quickExpenseTitle" type="text" placeholder="Hotel advance, petrol, snacks" required />
               </label>
               <div class="form-row">
                 <label>
-                  Amount
+                  <span>Amount</span>
                   <input id="quickExpenseAmount" type="number" min="1" step="1" placeholder="2500" required />
                 </label>
                 <label>
-                  Paid by
+                  <span>Paid by</span>
                   <select id="quickExpensePaidBy" required></select>
                 </label>
               </div>
-              <label>
-                Bill photo optional
-                <input id="quickExpenseBill" type="file" accept="image/*" />
+              <label class="file-drop compact-drop">
+                <input id="quickExpenseBill" type="file" accept="image/*" capture="environment" />
+                <span>📸 Optional bill photo</span>
               </label>
-              <button class="primary-btn" type="submit">Add expense</button>
+              <button class="primary-btn full" type="submit">Save expense</button>
             </form>
           </article>
 
-          <article class="card">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">Settle up</p>
-                <h2>Who pays whom</h2>
-              </div>
+          <article class="panel-card vibe-card">
+            <p class="eyebrow">Current vibe</p>
+            <h2 id="roomNameText">Live room</h2>
+            <p class="soft-text">Share this page link with all 7 friends. Same trip code = same live board.</p>
+            <div class="mini-grid">
+              <div><strong id="orderPeopleCount">0</strong><span>food people</span></div>
+              <div><strong id="orderItemsCount">0</strong><span>order items</span></div>
+              <div><strong id="latestUpdateText">Now</strong><span>last update</span></div>
             </div>
-            <div id="settlementList" class="stack-list empty-ready"></div>
           </article>
         </div>
       </section>
 
-      <section class="panel" id="friendsPanel">
+      <section class="section" id="friendsSection" data-section="friends">
         <div class="section-head spread">
           <div>
-            <p class="eyebrow">Team</p>
+            <p class="eyebrow">Squad</p>
             <h2>Friends & budgets</h2>
-            <p class="soft-copy">Edit names and personal trip budget. Changes save instantly.</p>
+            <p class="soft-text">Change names, budgets, or add/remove people.</p>
           </div>
-          <button class="primary-btn small" id="addFriendBtn" type="button">+ Add friend</button>
+          <button class="primary-btn small" id="addFriendBtn" type="button">+ Friend</button>
         </div>
-        <div id="friendsList" class="friend-grid"></div>
+        <div class="friend-grid" id="friendsList"></div>
       </section>
 
-      <section class="panel" id="expensesPanel">
+      <section class="section" id="expensesSection" data-section="expenses">
         <div class="section-head spread">
           <div>
-            <p class="eyebrow">Money</p>
+            <p class="eyebrow">Money log</p>
             <h2>Expenses</h2>
-            <p class="soft-copy">Simple list. Add bills from Overview or Bills section.</p>
+            <p class="soft-text">Simple expense tracking only. No payback or settlement section.</p>
           </div>
-          <button class="secondary-btn small" id="clearExpensesBtn" type="button">Clear all</button>
+          <button class="danger-lite small" id="clearExpensesBtn" type="button">Clear</button>
         </div>
-        <div class="two-col expenses-layout">
-          <article class="card">
+
+        <div class="content-grid expenses-grid">
+          <article class="panel-card">
             <h3>Add detailed expense</h3>
-            <form class="clean-form" id="expenseForm">
+            <form id="expenseForm" class="form-stack">
               <label>
-                Title
-                <input id="expenseTitle" type="text" placeholder="Cafe bill, ropeway tickets..." required />
+                <span>Title</span>
+                <input id="expenseTitle" type="text" placeholder="Cafe bill, ropeway tickets" required />
               </label>
               <div class="form-row">
                 <label>
-                  Amount
+                  <span>Amount</span>
                   <input id="expenseAmount" type="number" min="1" step="1" required />
                 </label>
                 <label>
-                  Paid by
+                  <span>Paid by</span>
                   <select id="expensePaidBy" required></select>
                 </label>
               </div>
-              <fieldset>
-                <legend>Split between</legend>
-                <div id="splitWithList" class="check-grid"></div>
-              </fieldset>
               <label>
-                Attach bill photo
-                <input id="expenseBill" type="file" accept="image/*" />
+                <span>Note</span>
+                <input id="expenseNote" type="text" placeholder="Optional note" />
               </label>
-              <button class="primary-btn" type="submit">Add to trip</button>
+              <label class="file-drop">
+                <input id="expenseBill" type="file" accept="image/*" capture="environment" />
+                <span>📷 Attach bill photo</span>
+                <small>Camera or gallery</small>
+              </label>
+              <button class="primary-btn full" type="submit">Add expense</button>
             </form>
           </article>
-          <article class="card expense-feed-card">
-            <h3>Recent expenses</h3>
-            <div id="expensesList" class="stack-list empty-ready"></div>
+
+          <article class="panel-card list-card">
+            <div class="section-head compact">
+              <h3>Recent expenses</h3>
+              <span class="count-pill" id="expenseCountPill">0</span>
+            </div>
+            <div class="stack-list" id="expensesList"></div>
           </article>
         </div>
       </section>
 
-      <section class="panel" id="ordersPanel">
+      <section class="section" id="ordersSection" data-section="orders">
         <div class="section-head spread">
           <div>
-            <p class="eyebrow">Restaurant mode</p>
-            <h2>Order board</h2>
-            <p class="soft-copy">Friends add item names. You add the final total and split it cleanly.</p>
+            <p class="eyebrow">Restaurant stop</p>
+            <h2>Food order board</h2>
+            <p class="soft-text">Friends add their item names. You enter final bill total.</p>
           </div>
-          <button class="primary-btn small" id="newOrderBtn" type="button">+ New order</button>
+          <button class="secondary-btn small" id="newOrderBtn" type="button">New stop</button>
         </div>
 
-        <div class="two-col">
-          <article class="card">
-            <h3>Current stop</h3>
-            <div class="clean-form">
+        <div class="content-grid orders-grid">
+          <article class="panel-card order-live-card">
+            <label>
+              <span>Restaurant / stop name</span>
+              <input id="orderPlace" type="text" placeholder="Cafe Library Bazaar" />
+            </label>
+            <form id="orderItemForm" class="form-stack top-space">
+              <div class="form-row">
+                <label>
+                  <span>Friend</span>
+                  <select id="orderFriend" required></select>
+                </label>
+                <label>
+                  <span>Item name</span>
+                  <input id="orderItemName" type="text" placeholder="Momos, Maggi, Cold coffee" required />
+                </label>
+              </div>
+              <button class="primary-btn full" type="submit">Add item</button>
+            </form>
+            <div class="final-total-box">
               <label>
-                Place name
-                <input id="orderPlace" type="text" placeholder="Cafe De Tavern" />
+                <span>Final bill total</span>
+                <input id="orderTotal" type="number" min="0" step="1" placeholder="Enter after bill comes" />
+              </label>
+              <div>
+                <span>Approx split</span>
+                <strong id="orderSplitAmount">₹0</strong>
+                <small id="orderSplitHint">Add orders first</small>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel-card list-card">
+            <div class="section-head compact">
+              <h3>Items added</h3>
+              <span class="count-pill" id="orderCountPill">0</span>
+            </div>
+            <div class="stack-list" id="orderItemsList"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="billsSection" data-section="bills">
+        <div class="section-head spread">
+          <div>
+            <p class="eyebrow">Proofs</p>
+            <h2>Bill photos</h2>
+            <p class="soft-text">Upload restaurant, hotel, petrol or ticket bills. Photos sync through Firebase Storage.</p>
+          </div>
+        </div>
+
+        <div class="content-grid bills-grid">
+          <article class="panel-card">
+            <h3>Upload bill photo</h3>
+            <form id="billForm" class="form-stack">
+              <label>
+                <span>Bill name</span>
+                <input id="billTitle" type="text" placeholder="Dinner at Mall Road" required />
               </label>
               <div class="form-row">
                 <label>
-                  Friend
-                  <select id="orderFriend"></select>
+                  <span>Amount</span>
+                  <input id="billAmount" type="number" min="0" step="1" placeholder="Optional" />
                 </label>
                 <label>
-                  Item
-                  <input id="orderItem" type="text" placeholder="Momos, tea, sandwich..." />
+                  <span>Paid by</span>
+                  <select id="billPaidBy"></select>
                 </label>
               </div>
-              <button class="primary-btn" id="addOrderItemBtn" type="button">Add item</button>
-              <div class="divider"></div>
-              <label>
-                Final restaurant total
-                <input id="orderTotal" type="number" min="0" step="1" placeholder="Enter after bill comes" />
+              <label class="file-drop large-drop">
+                <input id="billPhoto" type="file" accept="image/*" capture="environment" required />
+                <span>📸 Tap to upload bill photo</span>
+                <small>Image is compressed before upload</small>
               </label>
-              <button class="secondary-btn" id="saveOrderTotalBtn" type="button">Save total</button>
-            </div>
+              <button class="primary-btn full" type="submit">Save bill</button>
+            </form>
           </article>
 
-          <article class="card">
+          <article class="panel-card gallery-card">
             <div class="section-head compact">
-              <div>
-                <h3 id="orderTitle">No order yet</h3>
-                <p id="orderSplitText" class="soft-copy">Create an order to start.</p>
-              </div>
+              <h3>Bill gallery</h3>
+              <span class="count-pill" id="billCountPill">0</span>
             </div>
-            <div id="orderItemsList" class="stack-list empty-ready"></div>
+            <div class="bill-gallery" id="billGallery"></div>
           </article>
         </div>
       </section>
 
-      <section class="panel" id="billsPanel">
+      <section class="section" id="settingsSection" data-section="settings">
         <div class="section-head spread">
           <div>
-            <p class="eyebrow">Receipts</p>
-            <h2>Bill photos</h2>
-            <p class="soft-copy">Upload bill photos. They are compressed and saved locally in this browser.</p>
+            <p class="eyebrow">Sharing</p>
+            <h2>Sync settings</h2>
+            <p class="soft-text">Use one trip code. Copy the friend link and send it in your group chat.</p>
           </div>
-          <button class="secondary-btn small" id="clearBillsBtn" type="button">Clear bills</button>
         </div>
 
-        <div class="two-col bills-layout">
-          <article class="card upload-card">
-            <h3>Upload bill photo</h3>
-            <form id="billForm" class="clean-form">
-              <label>
-                Bill title
-                <input id="billTitle" type="text" placeholder="Kalsang lunch bill" required />
-              </label>
-              <label>
-                Amount optional
-                <input id="billAmount" type="number" min="0" step="1" placeholder="1250" />
-              </label>
-              <label class="drop-zone" for="billPhoto">
-                <input id="billPhoto" type="file" accept="image/*" required />
-                <span>📸</span>
-                <strong>Tap to upload bill photo</strong>
-                <small>JPG, PNG or camera photo</small>
-              </label>
-              <button class="primary-btn" type="submit">Save bill</button>
-            </form>
+        <div class="content-grid settings-grid">
+          <article class="panel-card">
+            <h3>Friend link</h3>
+            <div class="copy-box">
+              <input id="shareLinkInput" readonly />
+              <button class="primary-btn small" id="copyLinkBtn2" type="button">Copy</button>
+            </div>
+            <p class="soft-text tiny">Anyone with this link can edit this trip if your Firebase rules allow it.</p>
           </article>
-          <article class="card bill-feed-card">
-            <h3>Saved bills</h3>
-            <div id="billsList" class="bill-grid empty-ready"></div>
+
+          <article class="panel-card">
+            <h3>Trip tools</h3>
+            <div class="tool-grid">
+              <button class="secondary-btn" id="exportBtn" type="button">Export backup</button>
+              <button class="danger-lite" id="resetTripBtn" type="button">Reset trip</button>
+            </div>
+            <p class="soft-text tiny" id="setupHint">Firestore + Storage must be enabled in Firebase.</p>
           </article>
         </div>
       </section>
     </main>
   </div>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <nav class="bottom-nav" aria-label="Mobile navigation">
+    <button class="active" data-nav="overview" type="button"><span>⌂</span>Home</button>
+    <button data-nav="friends" type="button"><span>👥</span>Friends</button>
+    <button data-nav="expenses" type="button"><span>₹</span>Spend</button>
+    <button data-nav="orders" type="button"><span>🍜</span>Orders</button>
+    <button data-nav="bills" type="button"><span>📸</span>Bills</button>
+  </nav>
 
-  <input type="file" id="importInput" accept="application/json" hidden />
-  <script src="app.js"></script>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
