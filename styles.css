@@ -845,3 +845,24 @@ body.admin-mode .viewer-only {
     width: min(calc(100% - 24px), 760px);
   }
 }
+
+.file-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.35);
+  padding: 0 18px;
+  background: rgba(255,255,255,.14);
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+.backup-card { margin-top: 18px; }
+@media (max-width: 620px) {
+  .hero-card { padding-top: max(32px, env(safe-area-inset-top)); }
+  .hero-grid { gap: 14px; }
+  .admin-actions { gap: 10px; }
+  .backup-card .admin-actions { flex-direction: row; flex-wrap: wrap; }
+}

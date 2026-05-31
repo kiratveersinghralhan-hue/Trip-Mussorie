@@ -47,6 +47,18 @@
           <button id="adminUnlockBtn" class="light-btn" type="button">Unlock</button>
           <button id="adminLockBtn" class="danger-lite hidden" type="button">Lock</button>
         </div>
+
+      <div class="admin-card admin-only backup-card">
+        <div>
+          <span>Backup & restore</span>
+          <p>Save a copy before updating files. Import can restore friends, expenses, and orders.</p>
+        </div>
+        <div class="admin-actions">
+          <button id="exportDataBtn" class="light-btn" type="button">Export data</button>
+          <label class="file-btn">Import data<input id="importDataInput" type="file" accept="application/json" hidden /></label>
+        </div>
+      </div>
+
       </div>
     </header>
 

@@ -114,6 +114,8 @@ function bindStaticEvents() {
   $("#cancelOrderEditBtn").addEventListener("click", resetOrderForm);
   $("#saveOrderTotalBtn").addEventListener("click", saveOrderTotal);
   $("#clearOrderBtn").addEventListener("click", clearOrders);
+  $("#exportDataBtn").addEventListener("click", exportTripData);
+  $("#importDataInput").addEventListener("change", importTripData);
 }
 
 async function joinTrip(rawCode) {
@@ -781,6 +783,64 @@ function updateOrderSplitText() {
     text.textContent = `${people} people ordered. Split is about ${money(total / people)} each.`;
   } else {
     text.textContent = `${people} people ordered. Enter final total to show per-person split.`;
+  }
+}
+
+
+function exportTripData() {
+  if (!requireAdmin()) return;
+  const payload = {
+    version: 2,
+    tripCode: currentTripCode,
+    exportedAt: new Date().toISOString(),
+    data: {
+      friends: state.friends,
+      expenses: state.expenses,
+      orders: state.orders,
+      orderTotal: state.orderTotal
+    }
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${currentTripCode || "trip"}-backup.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast("Backup downloaded.");
+}
+
+async function importTripData(event) {
+  if (!requireAdmin()) return;
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const data = parsed.data || parsed;
+    const next = normalizeState({
+      adminPin: state.adminPin,
+      friends: Array.isArray(data.friends) ? data.friends : state.friends,
+      expenses: Array.isArray(data.expenses) ? data.expenses : state.expenses,
+      orders: Array.isArray(data.orders) ? data.orders : state.orders,
+      orderTotal: Number(data.orderTotal || 0)
+    });
+
+    if (!confirm("Import this backup and replace current trip data?")) return;
+    await updateTrip({
+      friends: next.friends,
+      expenses: next.expenses,
+      orders: next.orders,
+      orderTotal: next.orderTotal
+    });
+    toast("Backup restored.");
+  } catch (error) {
+    console.error(error);
+    toast("Could not import this file.");
   }
 }
 
