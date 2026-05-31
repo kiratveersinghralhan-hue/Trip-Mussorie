@@ -6,24 +6,17 @@ import {
   setDoc,
   getDoc
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import {
-  getStorage,
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyA0TPLn-m5aj6pwid9-z9OpNzyoihTx-sk",
   authDomain: "mussorie-trip.firebaseapp.com",
   projectId: "mussorie-trip",
-  storageBucket: "mussorie-trip.firebasestorage.app",
   messagingSenderId: "1081829884180",
   appId: "1:1081829884180:web:0d65738cf59dc8e6d98201",
   measurementId: "G-J9NF5DH31T"
 };
 
-const APP_VERSION = "premium-firestore-v1";
+const APP_VERSION = "premium-firestore-nophotos-v2";
 const DEFAULT_TRIP_CODE = "mussorie-boys-trip";
 const LOCAL_TRIP_KEY = "mussoorie.trip.code.premium";
 const LOCAL_CACHE_KEY = "mussoorie.trip.cache.premium";
@@ -43,7 +36,6 @@ const deviceId = getDeviceId();
 
 let app;
 let db;
-let storage;
 let tripRef;
 let unsubscribeTrip;
 let saveTimer;
@@ -51,6 +43,7 @@ let toastTimer;
 let isApplyingRemote = false;
 let isRemoteReady = false;
 let activeSection = localStorage.getItem(LOCAL_SECTION_KEY) || "overview";
+if (!["overview", "friends", "expenses", "orders", "settings"].includes(activeSection)) activeSection = "overview";
 let tripCode = getInitialTripCode();
 let state = loadCache() || createDefaultState();
 
@@ -76,7 +69,6 @@ function createDefaultState() {
         createdAt: now
       }
     },
-    bills: [],
     meta: {
       version: APP_VERSION,
       updatedAt: now,
@@ -104,7 +96,6 @@ function normalizeState(raw) {
         items: Array.isArray(activeOrder.items) ? activeOrder.items.map(normalizeOrderItem) : []
       }
     },
-    bills: Array.isArray(value.bills) ? value.bills.map(normalizeBill) : [],
     meta: {
       ...base.meta,
       ...(value.meta || {})
@@ -128,8 +119,6 @@ function normalizeExpense(expense) {
     amount: Number(expense.amount || 0),
     paidBy: expense.paidBy || "",
     note: expense.note || "",
-    billUrl: expense.billUrl || "",
-    billStoragePath: expense.billStoragePath || "",
     createdAt: expense.createdAt || new Date().toISOString()
   };
 }
@@ -140,18 +129,6 @@ function normalizeOrderItem(item) {
     friendId: item.friendId || "",
     itemName: String(item.itemName || item.name || "Item"),
     createdAt: item.createdAt || new Date().toISOString()
-  };
-}
-
-function normalizeBill(bill) {
-  return {
-    id: bill.id || makeId(),
-    title: String(bill.title || "Bill photo"),
-    amount: Number(bill.amount || 0),
-    paidBy: bill.paidBy || "",
-    photoUrl: bill.photoUrl || bill.url || "",
-    storagePath: bill.storagePath || "",
-    createdAt: bill.createdAt || new Date().toISOString()
   };
 }
 
@@ -212,7 +189,6 @@ function initFirebase() {
   try {
     app = initializeApp(firebaseConfig);
     db = getFirestore(app);
-    storage = getStorage(app);
     connectTrip(tripCode);
   } catch (error) {
     console.error(error);
@@ -303,7 +279,6 @@ function render() {
   renderFriends();
   renderExpenses();
   renderOrders();
-  renderBills();
   renderShareLink();
 }
 
@@ -337,7 +312,6 @@ function renderMetrics() {
   $("#balanceAmount").textContent = money.format(balance);
   $("#friendCountText").textContent = `${state.friends.length} friends`;
   $("#expenseCountText").textContent = `${state.expenses.length} expenses`;
-  $("#billCountText").textContent = String(state.bills.length);
   $("#balanceHint").textContent = balance >= 0 ? "Still in budget" : "Over budget";
   $("#orderPeopleCount").textContent = String(peopleCount);
   $("#orderItemsCount").textContent = String(itemCount);
@@ -346,7 +320,6 @@ function renderMetrics() {
 
 function renderSelects() {
   const options = state.friends.map((friend) => `<option value="${escapeHtml(friend.id)}">${escapeHtml(friend.name)}</option>`).join("");
-  const optionalOptions = `<option value="">Not selected</option>${options}`;
 
   ["#quickExpensePaidBy", "#expensePaidBy", "#orderFriend"].forEach((selector) => {
     const select = $(selector);
@@ -354,11 +327,6 @@ function renderSelects() {
     select.innerHTML = options;
     if (state.friends.some((friend) => friend.id === current)) select.value = current;
   });
-
-  const billPaidBy = $("#billPaidBy");
-  const billCurrent = billPaidBy.value;
-  billPaidBy.innerHTML = optionalOptions;
-  if (state.friends.some((friend) => friend.id === billCurrent)) billPaidBy.value = billCurrent;
 }
 
 function renderFriends() {
@@ -408,7 +376,6 @@ function renderExpenses() {
 
   list.innerHTML = state.expenses.slice().sort(byNewest).map((expense) => {
     const paidBy = friendName(expense.paidBy) || "Not selected";
-    const billButton = expense.billUrl ? `<a class="tiny-btn" href="${escapeAttr(expense.billUrl)}" target="_blank" rel="noopener">Bill</a>` : "";
     return `
       <article class="item-card">
         <div class="item-top">
@@ -420,7 +387,6 @@ function renderExpenses() {
           <span class="amount">${money.format(expense.amount)}</span>
         </div>
         <div class="item-actions">
-          ${billButton}
           <button class="tiny-btn delete" data-delete-expense="${escapeAttr(expense.id)}" type="button">Delete</button>
         </div>
       </article>
@@ -471,37 +437,6 @@ function renderOrders() {
   });
 }
 
-function renderBills() {
-  const gallery = $("#billGallery");
-  $("#billCountPill").textContent = String(state.bills.length);
-  if (!state.bills.length) {
-    gallery.innerHTML = `<div class="empty-state">No bill photos yet.<br>Upload directly from phone camera.</div>`;
-    return;
-  }
-
-  gallery.innerHTML = state.bills.slice().sort(byNewest).map((bill) => `
-    <article class="bill-card">
-      <a href="${escapeAttr(bill.photoUrl)}" target="_blank" rel="noopener">
-        <img src="${escapeAttr(bill.photoUrl)}" alt="${escapeAttr(bill.title)}" loading="lazy" />
-      </a>
-      <div class="bill-info">
-        <strong>${escapeHtml(bill.title)}</strong>
-        <p>${bill.amount ? money.format(bill.amount) + " • " : ""}${escapeHtml(friendName(bill.paidBy) || "No payer")}<br>${formatDate(bill.createdAt)}</p>
-        <div class="item-actions">
-          <button class="tiny-btn delete" data-delete-bill="${escapeAttr(bill.id)}" type="button">Delete</button>
-        </div>
-      </div>
-    </article>
-  `).join("");
-
-  gallery.querySelectorAll("[data-delete-bill]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.bills = state.bills.filter((bill) => bill.id !== button.dataset.deleteBill);
-      queueSave();
-    });
-  });
-}
-
 function renderShareLink() {
   const url = new URL(location.href);
   url.searchParams.set("trip", tripCode);
@@ -517,7 +452,6 @@ function bindEvents() {
     showSection("overview");
     $("#quickExpenseTitle").focus();
   });
-  $("#heroBillBtn").addEventListener("click", () => showSection("bills"));
 
   $("#tripTitle").addEventListener("input", (event) => {
     state.trip.title = event.target.textContent.trim() || "Mussoorie Boys Trip";
@@ -548,8 +482,7 @@ function bindEvents() {
       title: $("#quickExpenseTitle").value,
       amount: $("#quickExpenseAmount").value,
       paidBy: $("#quickExpensePaidBy").value,
-      note: "",
-      file: $("#quickExpenseBill").files[0]
+      note: ""
     });
     event.target.reset();
     renderSelects();
@@ -561,8 +494,7 @@ function bindEvents() {
       title: $("#expenseTitle").value,
       amount: $("#expenseAmount").value,
       paidBy: $("#expensePaidBy").value,
-      note: $("#expenseNote").value,
-      file: $("#expenseBill").files[0]
+      note: $("#expenseNote").value
     });
     event.target.reset();
     renderSelects();
@@ -610,19 +542,6 @@ function bindEvents() {
     toast("New food stop ready");
   });
 
-  $("#billForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const file = $("#billPhoto").files[0];
-    if (!file) return toast("Choose a bill photo first");
-    await addBillPhoto({
-      title: $("#billTitle").value,
-      amount: $("#billAmount").value,
-      paidBy: $("#billPaidBy").value,
-      file
-    });
-    event.target.reset();
-    renderSelects();
-  });
 
   $("#exportBtn").addEventListener("click", exportBackup);
   $("#resetTripBtn").addEventListener("click", () => {
@@ -635,13 +554,14 @@ function bindEvents() {
 }
 
 function showSection(section) {
+  if (!["overview", "friends", "expenses", "orders", "settings"].includes(section)) section = "overview";
   activeSection = section;
   renderSections();
   const target = $(`#${section}Section`);
   if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-async function addExpenseFromForm({ title, amount, paidBy, note, file }) {
+async function addExpenseFromForm({ title, amount, paidBy, note }) {
   const trimmedTitle = String(title || "").trim();
   const numericAmount = Number(amount || 0);
   if (!trimmedTitle || numericAmount <= 0) return toast("Add expense title and amount");
@@ -652,117 +572,12 @@ async function addExpenseFromForm({ title, amount, paidBy, note, file }) {
     amount: numericAmount,
     paidBy,
     note: String(note || "").trim(),
-    billUrl: "",
-    billStoragePath: "",
     createdAt: new Date().toISOString()
   };
-
-  if (file) {
-    const upload = await uploadPhoto(file, "expense-bills");
-    if (upload?.url) {
-      expense.billUrl = upload.url;
-      expense.billStoragePath = upload.path || "";
-    }
-  }
 
   state.expenses.push(expense);
   queueSave();
   toast("Expense saved");
-}
-
-async function addBillPhoto({ title, amount, paidBy, file }) {
-  const trimmedTitle = String(title || "").trim();
-  if (!trimmedTitle) return toast("Add a bill name");
-  setUploadBusy(true);
-  try {
-    const upload = await uploadPhoto(file, "bill-photos");
-    if (!upload?.url) return;
-    state.bills.push({
-      id: makeId(),
-      title: trimmedTitle,
-      amount: Number(amount || 0),
-      paidBy,
-      photoUrl: upload.url,
-      storagePath: upload.path || "",
-      createdAt: new Date().toISOString()
-    });
-    queueSave();
-    toast("Bill photo uploaded");
-  } finally {
-    setUploadBusy(false);
-  }
-}
-
-function setUploadBusy(isBusy) {
-  const button = $("#billForm button[type='submit']");
-  button.disabled = isBusy;
-  button.textContent = isBusy ? "Uploading…" : "Save bill";
-}
-
-async function uploadPhoto(file, folder) {
-  if (!file.type.startsWith("image/")) {
-    toast("Please upload an image file");
-    return null;
-  }
-
-  try {
-    toast("Compressing photo…");
-    const blob = await compressImage(file);
-    const safeName = file.name.replace(/[^a-z0-9.\-_]/gi, "-").toLowerCase();
-    const path = `trip-bills/${tripCode}/${folder}/${Date.now()}-${safeName || "bill.jpg"}`;
-    const ref = storageRef(storage, path);
-    await uploadBytes(ref, blob, { contentType: "image/jpeg" });
-    const url = await getDownloadURL(ref);
-    return { url, path };
-  } catch (error) {
-    console.warn("Storage upload failed, trying small local fallback", error);
-    try {
-      const dataUrl = await compressImageToDataUrl(file, 760, 0.55);
-      if (dataUrl.length < 850000) {
-        toast("Storage blocked, saved compressed photo in Firestore instead");
-        return { url: dataUrl, path: "firestore-data-url" };
-      }
-    } catch (fallbackError) {
-      console.warn("Fallback image failed", fallbackError);
-    }
-    toast("Photo upload blocked. Check Firebase Storage rules.");
-    return null;
-  }
-}
-
-function compressImage(file, maxSize = 1180, quality = 0.72) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read image"));
-    reader.onload = () => {
-      const image = new Image();
-      image.onerror = () => reject(new Error("Could not load image"));
-      image.onload = () => {
-        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error("Compression failed"));
-        }, "image/jpeg", quality);
-      };
-      image.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-async function compressImageToDataUrl(file, maxSize, quality) {
-  const blob = await compressImage(file, maxSize, quality);
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not create data URL"));
-    reader.onload = () => resolve(reader.result);
-    reader.readAsDataURL(blob);
-  });
 }
 
 function removeFriend(id) {
@@ -770,7 +585,6 @@ function removeFriend(id) {
   state.friends = state.friends.filter((friend) => friend.id !== id);
   state.expenses = state.expenses.map((expense) => expense.paidBy === id ? { ...expense, paidBy: "" } : expense);
   state.orders.active.items = state.orders.active.items.filter((item) => item.friendId !== id);
-  state.bills = state.bills.map((bill) => bill.paidBy === id ? { ...bill, paidBy: "" } : bill);
   queueSave();
   toast("Friend removed");
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mussoorie Boys Trip</title>
-  <meta name="description" content="Premium realtime Mussoorie boys trip dashboard for friends, budgets, expenses, restaurant orders and bill photos." />
+  <meta name="description" content="Premium realtime Mussoorie boys trip dashboard for friends, budgets, expenses and restaurant orders." />
   <meta name="theme-color" content="#10241f" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,10 +35,9 @@
         <div class="hero-copy">
           <p class="eyebrow">Boys trip control room</p>
           <h1 contenteditable="true" spellcheck="false" id="tripTitle">Mussoorie Boys Trip</h1>
-          <p class="subtitle">One clean link for budgets, expenses, food orders and bill photos. Everyone sees updates live.</p>
+          <p class="subtitle">One clean link for budgets, expenses and food orders. Everyone sees updates live.</p>
           <div class="hero-actions">
             <button class="primary-btn" id="heroExpenseBtn" type="button">+ Add expense</button>
-            <button class="ghost-btn" id="heroBillBtn" type="button">Upload bill</button>
           </div>
         </div>
 
@@ -76,11 +75,6 @@
             <strong id="balanceAmount">₹0</strong>
             <small id="balanceHint">Ready for the hills</small>
           </article>
-          <article class="metric-card">
-            <span>Bills</span>
-            <strong id="billCountText">0</strong>
-            <small>photos saved</small>
-          </article>
         </div>
 
         <div class="content-grid">
@@ -106,10 +100,6 @@
                   <select id="quickExpensePaidBy" required></select>
                 </label>
               </div>
-              <label class="file-drop compact-drop">
-                <input id="quickExpenseBill" type="file" accept="image/*" capture="environment" />
-                <span>📸 Optional bill photo</span>
-              </label>
               <button class="primary-btn full" type="submit">Save expense</button>
             </form>
           </article>
@@ -170,11 +160,6 @@
               <label>
                 <span>Note</span>
                 <input id="expenseNote" type="text" placeholder="Optional note" />
-              </label>
-              <label class="file-drop">
-                <input id="expenseBill" type="file" accept="image/*" capture="environment" />
-                <span>📷 Attach bill photo</span>
-                <small>Camera or gallery</small>
               </label>
               <button class="primary-btn full" type="submit">Add expense</button>
             </form>
@@ -242,52 +227,6 @@
         </div>
       </section>
 
-      <section class="section" id="billsSection" data-section="bills">
-        <div class="section-head spread">
-          <div>
-            <p class="eyebrow">Proofs</p>
-            <h2>Bill photos</h2>
-            <p class="soft-text">Upload restaurant, hotel, petrol or ticket bills. Photos sync through Firebase Storage.</p>
-          </div>
-        </div>
-
-        <div class="content-grid bills-grid">
-          <article class="panel-card">
-            <h3>Upload bill photo</h3>
-            <form id="billForm" class="form-stack">
-              <label>
-                <span>Bill name</span>
-                <input id="billTitle" type="text" placeholder="Dinner at Mall Road" required />
-              </label>
-              <div class="form-row">
-                <label>
-                  <span>Amount</span>
-                  <input id="billAmount" type="number" min="0" step="1" placeholder="Optional" />
-                </label>
-                <label>
-                  <span>Paid by</span>
-                  <select id="billPaidBy"></select>
-                </label>
-              </div>
-              <label class="file-drop large-drop">
-                <input id="billPhoto" type="file" accept="image/*" capture="environment" required />
-                <span>📸 Tap to upload bill photo</span>
-                <small>Image is compressed before upload</small>
-              </label>
-              <button class="primary-btn full" type="submit">Save bill</button>
-            </form>
-          </article>
-
-          <article class="panel-card gallery-card">
-            <div class="section-head compact">
-              <h3>Bill gallery</h3>
-              <span class="count-pill" id="billCountPill">0</span>
-            </div>
-            <div class="bill-gallery" id="billGallery"></div>
-          </article>
-        </div>
-      </section>
-
       <section class="section" id="settingsSection" data-section="settings">
         <div class="section-head spread">
           <div>
@@ -313,7 +252,7 @@
               <button class="secondary-btn" id="exportBtn" type="button">Export backup</button>
               <button class="danger-lite" id="resetTripBtn" type="button">Reset trip</button>
             </div>
-            <p class="soft-text tiny" id="setupHint">Firestore + Storage must be enabled in Firebase.</p>
+            <p class="soft-text tiny" id="setupHint">Only Firestore must be enabled in Firebase.</p>
           </article>
         </div>
       </section>
@@ -325,7 +264,6 @@
     <button data-nav="friends" type="button"><span>👥</span>Friends</button>
     <button data-nav="expenses" type="button"><span>₹</span>Spend</button>
     <button data-nav="orders" type="button"><span>🍜</span>Orders</button>
-    <button data-nav="bills" type="button"><span>📸</span>Bills</button>
   </nav>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

@@ -21,12 +21,13 @@ No folders, no build step, no npm install.
 - 7 friends by default
 - Add, remove and rename friends
 - Edit each friend's budget
-- Add expenses with optional bill photo
+- Add expenses
 - Restaurant order board where friends add item names
 - Enter final restaurant total and see approx split
-- Upload bill photos from phone camera/gallery
 - Export JSON backup
-- No "who pays whom" or settlement section
+- No bill photo upload
+- No Firebase Storage required
+- No “who pays whom” or settlement section
 
 ## Deploy on GitHub Pages
 
@@ -41,16 +42,15 @@ No folders, no build step, no npm install.
 
 Your Firebase config is already pasted inside `app.js`.
 
-You still need to enable these in Firebase Console:
-
-### 1. Cloud Firestore
+You only need to enable **Cloud Firestore**:
 
 Firebase Console → Build → Firestore Database → Create database.
 
-For quick testing, you can use these open rules:
+For quick testing, paste these open rules in **Firestore Database → Rules**:
 
 ```js
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     match /trips/{tripId} {
@@ -60,22 +60,7 @@ service cloud.firestore {
 }
 ```
 
-### 2. Firebase Storage
-
-Firebase Console → Build → Storage → Get started.
-
-For quick testing, use these open rules:
-
-```js
-rules_version = '2';
-service firebase.storage {
-  match /b/{bucket}/o {
-    match /trip-bills/{tripId}/{allPaths=**} {
-      allow read, write: if true;
-    }
-  }
-}
-```
+Click **Publish**.
 
 ## Important privacy note
 
