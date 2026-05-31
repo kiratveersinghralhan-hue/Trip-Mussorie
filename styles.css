@@ -626,3 +626,222 @@ label,
     height: 56px;
   }
 }
+
+/* Admin + editable controls */
+.admin-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 24px;
+  background: rgba(255,255,255,.12);
+  backdrop-filter: blur(18px);
+}
+
+.admin-card span {
+  display: block;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  font-size: 20px;
+}
+
+.admin-card p {
+  margin: 5px 0 0;
+  color: rgba(255,255,255,.78);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.admin-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 118px;
+  gap: 10px;
+  align-items: center;
+}
+
+.admin-actions input {
+  min-height: 52px;
+  background: rgba(255,255,255,.17);
+  border-color: rgba(255,255,255,.25);
+  color: white;
+  font-weight: 850;
+}
+
+.admin-actions input::placeholder {
+  color: rgba(255,255,255,.64);
+}
+
+#adminLockBtn {
+  min-height: 52px;
+  background: rgba(255, 240, 239, .96);
+}
+
+.admin-only {
+  display: none !important;
+}
+
+body.admin-mode .admin-only {
+  display: block !important;
+}
+
+body.admin-mode .edit-toolbar.admin-only,
+body.admin-mode .form-card.admin-only,
+body.admin-mode .final-row.admin-only {
+  display: grid !important;
+}
+
+body.admin-mode .item-actions.admin-only {
+  display: flex !important;
+}
+
+body.admin-mode .viewer-only {
+  display: none !important;
+}
+
+.viewer-only {
+  display: block;
+}
+
+.form-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.form-actions .mini-btn {
+  width: 100%;
+}
+
+.editable-item {
+  align-items: flex-start;
+}
+
+.item-main {
+  min-width: 0;
+}
+
+.item-side {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.item-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.item-actions .mini-btn,
+.item-actions .danger-lite {
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 13px;
+  font-size: 13px;
+}
+
+.friend-view-card {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(255,255,255,.78);
+  background: var(--paper);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 52px rgba(9, 42, 35, 0.08);
+  border-radius: 28px;
+  padding: 16px;
+}
+
+.friend-view-card strong,
+.friend-view-card span {
+  display: block;
+}
+
+.friend-view-card strong {
+  font-size: 21px;
+  letter-spacing: -0.03em;
+}
+
+.friend-view-card span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.total-view {
+  margin-bottom: 10px;
+  padding: 14px 15px;
+  border-radius: 18px;
+  background: rgba(15, 91, 77, 0.08);
+  color: var(--green-950);
+  font-weight: 950;
+}
+
+.save-btn:disabled {
+  opacity: .56;
+  cursor: not-allowed;
+}
+
+@media (min-width: 700px) {
+  .admin-card {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    align-items: center;
+  }
+
+  .form-actions {
+    grid-template-columns: minmax(0, 1fr) 150px;
+  }
+}
+
+@media (max-width: 520px) {
+  :root {
+    --nav-height: 82px;
+  }
+
+  .app-shell {
+    padding-top: calc(28px + env(safe-area-inset-top));
+    padding-bottom: calc(var(--nav-height) + 96px + env(safe-area-inset-bottom));
+  }
+
+  .hero-card {
+    border-radius: 0 0 30px 30px;
+    margin-left: -16px;
+    margin-right: -16px;
+    padding: calc(22px + env(safe-area-inset-top)) 18px 22px;
+  }
+
+  .admin-actions,
+  .join-row {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-item,
+  .list-item {
+    display: grid;
+  }
+
+  .item-side {
+    justify-items: stretch;
+  }
+
+  .item-actions {
+    justify-content: stretch;
+  }
+
+  .item-actions .mini-btn,
+  .item-actions .danger-lite {
+    flex: 1;
+  }
+
+  .bottom-nav {
+    left: 12px;
+    right: 12px;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    width: min(calc(100% - 24px), 760px);
+  }
+}

@@ -1,45 +1,37 @@
-# Mussoorie Boys Trip
+# Mussoorie Boys Trip — Admin Editable Realtime Website
 
-A clean GitHub Pages-ready trip budget app.
+Root-only GitHub Pages website. No build tools, no npm, no folders.
 
 ## Files
 
-Keep all files in your repository root:
+- `index.html`
+- `styles.css`
+- `app.js`
+- `README.md`
+- `.nojekyll`
 
-```txt
-index.html
-styles.css
-app.js
-README.md
-.nojekyll
-```
+## What it does
 
-## What is fixed in this version
+- Realtime shared trip data using Firebase Cloud Firestore
+- Premium mobile-first UI
+- Friends and budgets
+- Editable expenses
+- Editable restaurant orders
+- Final order total
+- Admin mode with PIN
+- Friends can view live data, but only admin can change data from the UI
+- No bill photo uploads and no Firebase Storage needed
 
-Friend names and budgets no longer sync on every typed letter.
+## First setup
 
-Now it works like this:
+1. Upload all root files to your GitHub Pages repo.
+2. Open the website yourself first.
+3. In the admin card, create an admin PIN.
+4. Then copy the friend link and share it.
 
-1. Open Friends
-2. Change all names/budgets
-3. Tap **Save changes**
-4. Then it syncs to everyone
+## Firebase Firestore rules for quick testing
 
-This prevents the mobile keyboard from closing while typing.
-
-## Firebase setup
-
-This version uses **Cloud Firestore only**.
-
-You do not need Firebase Storage. Bill photo upload is removed.
-
-### Firestore Rules
-
-Go to:
-
-Firebase Console → Build → Firestore Database → Rules
-
-Paste:
+Go to Firebase Console → Build → Firestore Database → Rules and paste:
 
 ```js
 rules_version = '2';
@@ -53,20 +45,6 @@ service cloud.firestore {
 }
 ```
 
-Then click **Publish**.
+## Important note
 
-## Sharing
-
-Upload these root files to GitHub Pages.
-
-Open your website, copy the friend link, and share it. Everyone using the same trip code sees the same live data.
-
-Example:
-
-```txt
-https://yourname.github.io/repo-name/?trip=mussorie-boys-trip
-```
-
-## Notes
-
-These rules are open for easy trip use. Anyone with the trip code can edit the trip.
+This admin PIN locks the website UI. With the quick testing rules above, Firestore itself is open to anyone who has the project details. For a small friends trip this is usually okay, but do not store private/sensitive data. A stronger admin system needs Firebase Authentication and stricter Firestore rules.

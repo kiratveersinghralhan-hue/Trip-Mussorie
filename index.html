@@ -16,7 +16,7 @@
         <div>
           <p class="eyebrow">Boys Trip</p>
           <h1>Mussoorie</h1>
-          <p class="hero-sub">Shared budget, spends, food orders — all live.</p>
+          <p class="hero-sub">Shared budget, spends, and food orders — clean and live.</p>
         </div>
         <div class="live-pill" id="syncStatus">Connecting…</div>
       </div>
@@ -31,9 +31,21 @@
           <label for="tripCodeInput">Shared trip code</label>
           <div class="join-row">
             <input id="tripCodeInput" type="text" inputmode="text" autocomplete="off" spellcheck="false" />
-            <button id="joinTripBtn" class="light-btn">Join</button>
+            <button id="joinTripBtn" class="light-btn" type="button">Join</button>
           </div>
           <button id="copyLinkBtn" class="ghost-link" type="button">Copy friend link</button>
+        </div>
+      </div>
+
+      <div class="admin-card">
+        <div>
+          <span id="adminStateTitle">Viewer mode</span>
+          <p id="adminStateText">Unlock admin mode to edit trip data.</p>
+        </div>
+        <div class="admin-actions">
+          <input id="adminPinInput" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="Admin PIN" />
+          <button id="adminUnlockBtn" class="light-btn" type="button">Unlock</button>
+          <button id="adminLockBtn" class="danger-lite hidden" type="button">Lock</button>
         </div>
       </div>
     </header>
@@ -71,7 +83,7 @@
               <p class="eyebrow">Squad</p>
               <h3>Friends</h3>
             </div>
-            <button class="mini-btn" data-go="friends">Edit</button>
+            <button class="mini-btn admin-only" data-go="friends" type="button">Edit</button>
           </div>
           <div id="friendChips" class="chip-wrap"></div>
         </div>
@@ -91,10 +103,11 @@
         <div class="section-title">
           <p class="eyebrow gold">Squad</p>
           <h2>Friends & budgets</h2>
-          <span>Edit freely. Nothing syncs until you tap Save.</span>
+          <span class="admin-only">Edit freely. Nothing syncs until you tap Save.</span>
+          <span class="viewer-only">Read-only view. Admin PIN required to edit.</span>
         </div>
 
-        <div class="edit-toolbar">
+        <div class="edit-toolbar admin-only">
           <button id="addFriendBtn" class="primary-btn" type="button">+ Friend</button>
           <button id="saveFriendsBtn" class="save-btn" type="button">Save changes</button>
         </div>
@@ -106,11 +119,13 @@
       <section class="tab-panel" id="spendPanel">
         <div class="section-title">
           <p class="eyebrow gold">Spend</p>
-          <h2>Add expense</h2>
-          <span>Add one bill or payment at a time.</span>
+          <h2 id="expenseSectionTitle">Add expense</h2>
+          <span class="admin-only">Add or edit payments from here.</span>
+          <span class="viewer-only">Expenses are locked. Ask admin to make changes.</span>
         </div>
 
-        <form id="expenseForm" class="clean-card form-card">
+        <form id="expenseForm" class="clean-card form-card admin-only">
+          <input id="editingExpenseId" type="hidden" />
           <label>
             Expense name
             <input id="expenseTitle" type="text" placeholder="Petrol, hotel, snacks…" required />
@@ -131,7 +146,10 @@
             <div id="splitList" class="check-grid"></div>
           </div>
 
-          <button class="primary-btn" type="submit">Add expense</button>
+          <div class="form-actions">
+            <button id="expenseSubmitBtn" class="primary-btn" type="submit">Add expense</button>
+            <button id="cancelExpenseEditBtn" class="mini-btn hidden" type="button">Cancel edit</button>
+          </div>
         </form>
 
         <div class="clean-card">
@@ -149,10 +167,12 @@
         <div class="section-title">
           <p class="eyebrow gold">Food Stop</p>
           <h2>Restaurant order</h2>
-          <span>Everyone can add items. You can set final total later.</span>
+          <span class="admin-only">Add, edit, or clear order items.</span>
+          <span class="viewer-only">Order list is read-only for friends.</span>
         </div>
 
-        <form id="orderForm" class="clean-card form-card">
+        <form id="orderForm" class="clean-card form-card admin-only">
+          <input id="editingOrderId" type="hidden" />
           <label>
             Friend
             <select id="orderFriend" required></select>
@@ -165,7 +185,10 @@
             Approx price
             <input id="orderPrice" type="number" min="0" step="1" placeholder="Optional" />
           </label>
-          <button class="primary-btn" type="submit">Add order item</button>
+          <div class="form-actions">
+            <button id="orderSubmitBtn" class="primary-btn" type="submit">Add order item</button>
+            <button id="cancelOrderEditBtn" class="mini-btn hidden" type="button">Cancel edit</button>
+          </div>
         </form>
 
         <div class="clean-card">
@@ -175,7 +198,8 @@
               <h3>Order total</h3>
             </div>
           </div>
-          <div class="final-row">
+          <div id="orderTotalView" class="total-view viewer-only">No final total yet.</div>
+          <div class="final-row admin-only">
             <input id="orderTotalInput" type="number" min="0" step="1" placeholder="Enter restaurant total" />
             <button id="saveOrderTotalBtn" class="save-btn" type="button">Save</button>
           </div>
@@ -188,7 +212,7 @@
               <p class="eyebrow">Live list</p>
               <h3>Current order</h3>
             </div>
-            <button id="clearOrderBtn" class="danger-lite" type="button">Clear</button>
+            <button id="clearOrderBtn" class="danger-lite admin-only" type="button">Clear</button>
           </div>
           <div id="orderList" class="item-list"></div>
         </div>
@@ -197,19 +221,19 @@
   </div>
 
   <nav class="bottom-nav" aria-label="Main navigation">
-    <button class="nav-btn active" data-tab="home">
+    <button class="nav-btn active" data-tab="home" type="button">
       <span>⌂</span>
       <strong>Home</strong>
     </button>
-    <button class="nav-btn" data-tab="friends">
+    <button class="nav-btn" data-tab="friends" type="button">
       <span>👥</span>
       <strong>Friends</strong>
     </button>
-    <button class="nav-btn" data-tab="spend">
+    <button class="nav-btn" data-tab="spend" type="button">
       <span>₹</span>
       <strong>Spend</strong>
     </button>
-    <button class="nav-btn" data-tab="orders">
+    <button class="nav-btn" data-tab="orders" type="button">
       <span>🍜</span>
       <strong>Orders</strong>
     </button>

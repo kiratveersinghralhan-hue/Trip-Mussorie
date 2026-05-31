@@ -35,9 +35,12 @@ let app;
 let db;
 let tripRef;
 let unsubscribe = null;
+let currentTripCode = "";
 let activeTab = "home";
+let isAdmin = false;
 
 let state = {
+  adminPin: "",
   friends: [],
   expenses: [],
   orders: [],
@@ -47,6 +50,8 @@ let state = {
 let friendsDraft = null;
 let friendsDirty = false;
 let remoteWaiting = false;
+let editingExpenseId = "";
+let editingOrderId = "";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -85,6 +90,12 @@ function bindStaticEvents() {
     }
   });
 
+  $("#adminUnlockBtn").addEventListener("click", handleAdminUnlock);
+  $("#adminLockBtn").addEventListener("click", lockAdmin);
+  $("#adminPinInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") handleAdminUnlock();
+  });
+
   $$(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   });
@@ -96,8 +107,11 @@ function bindStaticEvents() {
   $("#addFriendBtn").addEventListener("click", addDraftFriend);
   $("#saveFriendsBtn").addEventListener("click", saveFriends);
 
-  $("#expenseForm").addEventListener("submit", addExpense);
-  $("#orderForm").addEventListener("submit", addOrder);
+  $("#expenseForm").addEventListener("submit", saveExpenseFromForm);
+  $("#cancelExpenseEditBtn").addEventListener("click", resetExpenseForm);
+
+  $("#orderForm").addEventListener("submit", saveOrderFromForm);
+  $("#cancelOrderEditBtn").addEventListener("click", resetOrderForm);
   $("#saveOrderTotalBtn").addEventListener("click", saveOrderTotal);
   $("#clearOrderBtn").addEventListener("click", clearOrders);
 }
@@ -108,8 +122,16 @@ async function joinTrip(rawCode) {
 
   if (unsubscribe) unsubscribe();
 
+  currentTripCode = code;
   localStorage.setItem("mussoorieTripCode", code);
   tripCodeInput.value = code;
+  isAdmin = false;
+  friendsDraft = null;
+  friendsDirty = false;
+  editingExpenseId = "";
+  editingOrderId = "";
+  resetExpenseForm(false);
+  resetOrderForm(false);
 
   const url = new URL(window.location.href);
   url.searchParams.set("trip", code);
@@ -121,6 +143,7 @@ async function joinTrip(rawCode) {
   const snap = await getDoc(tripRef);
   if (!snap.exists()) {
     await setDoc(tripRef, {
+      adminPin: "",
       friends: defaultFriends,
       expenses: [],
       orders: [],
@@ -135,17 +158,8 @@ async function joinTrip(rawCode) {
     (snapshot) => {
       const data = snapshot.data() || {};
       state = normalizeState(data);
+      syncAdminFromLocal();
       setStatus("Live");
-
-      if (activeTab === "friends" && friendsDirty) {
-        remoteWaiting = true;
-        showFriendNote("Live updates are paused while you edit. Tap Save changes to sync.");
-        renderEverythingExceptFriendEditor();
-        return;
-      }
-
-      remoteWaiting = false;
-      friendsDraft = null;
       renderAll();
     },
     (error) => {
@@ -158,6 +172,7 @@ async function joinTrip(rawCode) {
 
 function normalizeState(data) {
   return {
+    adminPin: String(data.adminPin || ""),
     friends: Array.isArray(data.friends) ? data.friends : [],
     expenses: Array.isArray(data.expenses) ? data.expenses : [],
     orders: Array.isArray(data.orders) ? data.orders : [],
@@ -166,20 +181,109 @@ function normalizeState(data) {
 }
 
 function renderAll() {
+  renderAdminUI();
   renderOverview();
-  renderFriendEditor();
-  renderExpenseForm();
+
+  if (!(activeTab === "friends" && friendsDirty && isAdmin)) {
+    renderFriendEditor();
+  } else {
+    renderEverythingExceptFriendEditor();
+    showFriendNote("Editing locally. Tap Save changes when done.");
+  }
+
+  if (!isActiveInside("#expenseForm")) renderExpenseForm();
   renderExpenseList();
-  renderOrderForm();
+
+  if (!isActiveInside("#orderForm")) renderOrderForm();
   renderOrderList();
 }
 
 function renderEverythingExceptFriendEditor() {
   renderOverview();
-  renderExpenseForm();
   renderExpenseList();
-  renderOrderForm();
   renderOrderList();
+}
+
+function renderAdminUI() {
+  document.body.classList.toggle("admin-mode", isAdmin);
+
+  const title = $("#adminStateTitle");
+  const text = $("#adminStateText");
+  const input = $("#adminPinInput");
+  const unlockBtn = $("#adminUnlockBtn");
+  const lockBtn = $("#adminLockBtn");
+
+  if (!state.adminPin) {
+    title.textContent = "Set admin PIN";
+    text.textContent = "First admin should set a PIN before sharing the link.";
+    input.classList.remove("hidden");
+    unlockBtn.classList.remove("hidden");
+    lockBtn.classList.add("hidden");
+    unlockBtn.textContent = "Set PIN";
+    input.placeholder = "Create PIN";
+    return;
+  }
+
+  if (isAdmin) {
+    title.textContent = "Admin mode active";
+    text.textContent = "You can edit friends, budgets, expenses, and orders.";
+    input.classList.add("hidden");
+    unlockBtn.classList.add("hidden");
+    lockBtn.classList.remove("hidden");
+  } else {
+    title.textContent = "Viewer mode";
+    text.textContent = "Friends can view live updates. Only admin can change data.";
+    input.classList.remove("hidden");
+    unlockBtn.classList.remove("hidden");
+    lockBtn.classList.add("hidden");
+    unlockBtn.textContent = "Unlock";
+    input.placeholder = "Admin PIN";
+  }
+}
+
+async function handleAdminUnlock() {
+  const input = $("#adminPinInput");
+  const pin = String(input.value || "").trim();
+
+  if (pin.length < 4) return toast("PIN should be at least 4 digits.");
+
+  if (!state.adminPin) {
+    await updateTrip({ adminPin: pin }, { allowWithoutAdmin: true });
+    localStorage.setItem(adminStorageKey(), pin);
+    isAdmin = true;
+    input.value = "";
+    toast("Admin PIN set.");
+    renderAll();
+    return;
+  }
+
+  if (pin === state.adminPin) {
+    localStorage.setItem(adminStorageKey(), pin);
+    isAdmin = true;
+    input.value = "";
+    toast("Admin unlocked.");
+    renderAll();
+  } else {
+    toast("Wrong admin PIN.");
+  }
+}
+
+function lockAdmin() {
+  localStorage.removeItem(adminStorageKey());
+  isAdmin = false;
+  friendsDraft = null;
+  friendsDirty = false;
+  editingExpenseId = "";
+  editingOrderId = "";
+  resetExpenseForm(false);
+  resetOrderForm(false);
+  toast("Admin locked.");
+  renderAll();
+}
+
+function syncAdminFromLocal() {
+  const savedPin = localStorage.getItem(adminStorageKey());
+  isAdmin = Boolean(state.adminPin && savedPin === state.adminPin);
 }
 
 function renderOverview() {
@@ -195,7 +299,7 @@ function renderOverview() {
   const chips = $("#friendChips");
   chips.innerHTML = "";
   if (!state.friends.length) {
-    chips.innerHTML = `<div class="empty">No friends yet. Add your squad.</div>`;
+    chips.innerHTML = `<div class="empty">No friends yet. Admin can add the squad.</div>`;
   } else {
     state.friends.forEach((friend) => {
       const chip = document.createElement("div");
@@ -233,6 +337,15 @@ function renderOverview() {
 
 function renderFriendEditor() {
   if (activeTab !== "friends") return;
+
+  if (!isAdmin) {
+    hideFriendNote();
+    friendsDraft = null;
+    friendsDirty = false;
+    renderFriendsReadOnly();
+    return;
+  }
+
   if (!friendsDraft || !friendsDirty) {
     friendsDraft = cloneFriends(state.friends);
   }
@@ -242,6 +355,7 @@ function renderFriendEditor() {
 
   if (!friendsDraft.length) {
     editor.innerHTML = `<div class="empty">No friends. Tap + Friend.</div>`;
+    updateFriendSaveButton();
     return;
   }
 
@@ -281,7 +395,31 @@ function renderFriendEditor() {
   if (!remoteWaiting && !friendsDirty) hideFriendNote();
 }
 
+function renderFriendsReadOnly() {
+  const editor = $("#friendsEditor");
+  editor.innerHTML = "";
+
+  if (!state.friends.length) {
+    editor.innerHTML = `<div class="empty">No friends yet.</div>`;
+    return;
+  }
+
+  state.friends.forEach((friend) => {
+    const card = document.createElement("article");
+    card.className = "friend-view-card";
+    card.innerHTML = `
+      <div class="avatar">${initial(friend.name)}</div>
+      <div>
+        <strong>${escapeHtml(friend.name || "Friend")}</strong>
+        <span>Budget ${money(friend.budget)}</span>
+      </div>
+    `;
+    editor.appendChild(card);
+  });
+}
+
 function addDraftFriend() {
+  if (!requireAdmin()) return;
   if (!friendsDraft) friendsDraft = cloneFriends(state.friends);
   friendsDraft.unshift({ id: uid(), name: "Friend", budget: 0 });
   markFriendsDirty();
@@ -301,11 +439,13 @@ function markFriendsDirty() {
 
 function updateFriendSaveButton() {
   const saveBtn = $("#saveFriendsBtn");
+  if (!saveBtn) return;
   saveBtn.textContent = friendsDirty ? "Save changes" : "Saved";
   saveBtn.disabled = !friendsDirty;
 }
 
 async function saveFriends() {
+  if (!requireAdmin()) return;
   if (!friendsDraft) return;
 
   const cleaned = friendsDraft
@@ -319,9 +459,7 @@ async function saveFriends() {
   $("#saveFriendsBtn").textContent = "Saving…";
   $("#saveFriendsBtn").disabled = true;
 
-  await updateTrip({
-    friends: cleaned
-  });
+  await updateTrip({ friends: cleaned });
 
   state.friends = cleaned;
   friendsDirty = false;
@@ -335,13 +473,16 @@ async function saveFriends() {
   }, 1400);
 }
 
-function renderExpenseForm() {
+function renderExpenseForm(selectedSplit = null) {
+  if (!isAdmin) return;
   fillFriendSelect($("#expensePaidBy"));
-  renderSplitList();
+  renderSplitList(selectedSplit);
+  updateExpenseFormButtons();
 }
 
-function renderSplitList() {
+function renderSplitList(selectedSplit = null) {
   const splitList = $("#splitList");
+  if (!splitList) return;
   splitList.innerHTML = "";
 
   if (!state.friends.length) {
@@ -349,19 +490,23 @@ function renderSplitList() {
     return;
   }
 
+  const selected = Array.isArray(selectedSplit) ? new Set(selectedSplit) : null;
+
   state.friends.forEach((friend) => {
+    const checked = selected ? selected.has(friend.id) : true;
     const label = document.createElement("label");
     label.className = "check-pill";
     label.innerHTML = `
-      <input type="checkbox" value="${escapeAttr(friend.id)}" checked />
+      <input type="checkbox" value="${escapeAttr(friend.id)}" ${checked ? "checked" : ""} />
       ${escapeHtml(friend.name || "Friend")}
     `;
     splitList.appendChild(label);
   });
 }
 
-async function addExpense(event) {
+async function saveExpenseFromForm(event) {
   event.preventDefault();
+  if (!requireAdmin()) return;
 
   const title = $("#expenseTitle").value.trim();
   const amount = toNumber($("#expenseAmount").value);
@@ -372,21 +517,76 @@ async function addExpense(event) {
   if (!splitWith.length) return toast("Select at least one person.");
 
   const expense = {
-    id: uid(),
+    id: editingExpenseId || uid(),
     title,
     amount,
     paidBy,
     splitWith,
-    createdAt: Date.now()
+    createdAt: state.expenses.find((item) => item.id === editingExpenseId)?.createdAt || Date.now(),
+    updatedAt: Date.now()
   };
 
-  await updateTrip({
-    expenses: [...state.expenses, expense]
-  });
+  const nextExpenses = editingExpenseId
+    ? state.expenses.map((item) => (item.id === editingExpenseId ? expense : item))
+    : [...state.expenses, expense];
 
-  event.target.reset();
-  renderExpenseForm();
-  toast("Expense added.");
+  await updateTrip({ expenses: nextExpenses });
+  resetExpenseForm();
+  toast(editingExpenseId ? "Expense saved." : "Expense added.");
+}
+
+function startEditExpense(id) {
+  if (!requireAdmin()) return;
+  const expense = state.expenses.find((item) => item.id === id);
+  if (!expense) return;
+
+  setActiveTab("spend", { keepScroll: true });
+  editingExpenseId = id;
+  $("#editingExpenseId").value = id;
+  renderExpenseForm(expense.splitWith || []);
+  $("#expenseTitle").value = expense.title || "";
+  $("#expenseAmount").value = toNumber(expense.amount) || "";
+  $("#expensePaidBy").value = expense.paidBy || "";
+  updateExpenseFormButtons();
+  $("#expenseTitle").focus();
+  $("#expenseForm").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function deleteExpense(id) {
+  if (!requireAdmin()) return;
+  const expense = state.expenses.find((item) => item.id === id);
+  if (!expense) return;
+  if (!confirm(`Delete expense "${expense.title || "Expense"}"?`)) return;
+  await updateTrip({ expenses: state.expenses.filter((item) => item.id !== id) });
+  if (editingExpenseId === id) resetExpenseForm();
+  toast("Expense deleted.");
+}
+
+function resetExpenseForm(render = true) {
+  editingExpenseId = "";
+  const form = $("#expenseForm");
+  if (form) form.reset();
+  const hidden = $("#editingExpenseId");
+  if (hidden) hidden.value = "";
+  if (render) renderExpenseForm();
+  updateExpenseFormButtons();
+}
+
+function updateExpenseFormButtons() {
+  const title = $("#expenseSectionTitle");
+  const submit = $("#expenseSubmitBtn");
+  const cancel = $("#cancelExpenseEditBtn");
+  if (!submit || !cancel || !title) return;
+
+  if (editingExpenseId) {
+    title.textContent = "Edit expense";
+    submit.textContent = "Save expense";
+    cancel.classList.remove("hidden");
+  } else {
+    title.textContent = "Add expense";
+    submit.textContent = "Add expense";
+    cancel.classList.add("hidden");
+  }
 }
 
 function renderExpenseList() {
@@ -400,30 +600,41 @@ function renderExpenseList() {
 
   [...state.expenses].reverse().forEach((expense) => {
     const row = document.createElement("div");
-    row.className = "list-item";
+    row.className = "list-item editable-item";
     row.innerHTML = `
-      <div>
+      <div class="item-main">
         <strong>${escapeHtml(expense.title || "Expense")}</strong>
         <span>Paid by ${escapeHtml(friendName(expense.paidBy))} • Split ${expense.splitWith?.length || 0} ways</span>
       </div>
-      <div class="amount">${money(expense.amount)}</div>
+      <div class="item-side">
+        <div class="amount">${money(expense.amount)}</div>
+        <div class="item-actions admin-only">
+          <button class="mini-btn edit-expense-btn" type="button">Edit</button>
+          <button class="danger-lite delete-expense-btn" type="button">Delete</button>
+        </div>
+      </div>
     `;
+    row.querySelector(".edit-expense-btn")?.addEventListener("click", () => startEditExpense(expense.id));
+    row.querySelector(".delete-expense-btn")?.addEventListener("click", () => deleteExpense(expense.id));
     list.appendChild(row);
   });
 }
 
 function renderOrderForm() {
+  if (!isAdmin) return;
   fillFriendSelect($("#orderFriend"));
 
   if (document.activeElement !== $("#orderTotalInput")) {
     $("#orderTotalInput").value = state.orderTotal || "";
   }
 
+  updateOrderFormButtons();
   updateOrderSplitText();
 }
 
-async function addOrder(event) {
+async function saveOrderFromForm(event) {
   event.preventDefault();
+  if (!requireAdmin()) return;
 
   const friendId = $("#orderFriend").value;
   const item = $("#orderItem").value.trim();
@@ -432,31 +643,86 @@ async function addOrder(event) {
   if (!friendId || !item) return toast("Select friend and item.");
 
   const order = {
-    id: uid(),
+    id: editingOrderId || uid(),
     friendId,
     item,
     price,
-    createdAt: Date.now()
+    createdAt: state.orders.find((old) => old.id === editingOrderId)?.createdAt || Date.now(),
+    updatedAt: Date.now()
   };
 
-  await updateTrip({
-    orders: [...state.orders, order]
-  });
+  const nextOrders = editingOrderId
+    ? state.orders.map((old) => (old.id === editingOrderId ? order : old))
+    : [...state.orders, order];
 
-  event.target.reset();
+  await updateTrip({ orders: nextOrders });
+  resetOrderForm();
+  toast(editingOrderId ? "Order item saved." : "Order item added.");
+}
+
+function startEditOrder(id) {
+  if (!requireAdmin()) return;
+  const order = state.orders.find((item) => item.id === id);
+  if (!order) return;
+
+  setActiveTab("orders", { keepScroll: true });
+  editingOrderId = id;
+  $("#editingOrderId").value = id;
   renderOrderForm();
-  toast("Order item added.");
+  $("#orderFriend").value = order.friendId || "";
+  $("#orderItem").value = order.item || "";
+  $("#orderPrice").value = toNumber(order.price) || "";
+  updateOrderFormButtons();
+  $("#orderItem").focus();
+  $("#orderForm").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function deleteOrder(id) {
+  if (!requireAdmin()) return;
+  const order = state.orders.find((item) => item.id === id);
+  if (!order) return;
+  if (!confirm(`Delete order item "${order.item || "Item"}"?`)) return;
+  await updateTrip({ orders: state.orders.filter((item) => item.id !== id) });
+  if (editingOrderId === id) resetOrderForm();
+  toast("Order item deleted.");
+}
+
+function resetOrderForm(render = true) {
+  editingOrderId = "";
+  const form = $("#orderForm");
+  if (form) form.reset();
+  const hidden = $("#editingOrderId");
+  if (hidden) hidden.value = "";
+  if (render) renderOrderForm();
+  updateOrderFormButtons();
+}
+
+function updateOrderFormButtons() {
+  const submit = $("#orderSubmitBtn");
+  const cancel = $("#cancelOrderEditBtn");
+  if (!submit || !cancel) return;
+
+  if (editingOrderId) {
+    submit.textContent = "Save order item";
+    cancel.classList.remove("hidden");
+  } else {
+    submit.textContent = "Add order item";
+    cancel.classList.add("hidden");
+  }
 }
 
 async function saveOrderTotal() {
+  if (!requireAdmin()) return;
   const total = Math.max(0, toNumber($("#orderTotalInput").value));
   await updateTrip({ orderTotal: total });
   toast("Order total saved.");
 }
 
 async function clearOrders() {
+  if (!requireAdmin()) return;
   if (!confirm("Clear all order items and total?")) return;
   await updateTrip({ orders: [], orderTotal: 0 });
+  resetOrderForm();
   toast("Order cleared.");
 }
 
@@ -472,14 +738,22 @@ function renderOrderList() {
 
   [...state.orders].reverse().forEach((order) => {
     const row = document.createElement("div");
-    row.className = "list-item";
+    row.className = "list-item editable-item";
     row.innerHTML = `
-      <div>
+      <div class="item-main">
         <strong>${escapeHtml(order.item || "Item")}</strong>
         <span>${escapeHtml(friendName(order.friendId))}</span>
       </div>
-      <div class="amount">${order.price ? money(order.price) : "—"}</div>
+      <div class="item-side">
+        <div class="amount">${order.price ? money(order.price) : "—"}</div>
+        <div class="item-actions admin-only">
+          <button class="mini-btn edit-order-btn" type="button">Edit</button>
+          <button class="danger-lite delete-order-btn" type="button">Delete</button>
+        </div>
+      </div>
     `;
+    row.querySelector(".edit-order-btn")?.addEventListener("click", () => startEditOrder(order.id));
+    row.querySelector(".delete-order-btn")?.addEventListener("click", () => deleteOrder(order.id));
     list.appendChild(row);
   });
 
@@ -490,6 +764,13 @@ function updateOrderSplitText() {
   const people = new Set(state.orders.map((order) => order.friendId)).size;
   const total = toNumber(state.orderTotal);
   const text = $("#orderSplitText");
+  const totalView = $("#orderTotalView");
+
+  if (totalView) {
+    totalView.textContent = total > 0 ? `Final total: ${money(total)}` : "No final total yet.";
+  }
+
+  if (!text) return;
 
   if (!state.orders.length) {
     text.textContent = "Add items to calculate food split.";
@@ -504,6 +785,7 @@ function updateOrderSplitText() {
 }
 
 function fillFriendSelect(select) {
+  if (!select) return;
   const current = select.value;
   select.innerHTML = "";
 
@@ -527,7 +809,7 @@ function fillFriendSelect(select) {
   }
 }
 
-function setActiveTab(tab) {
+function setActiveTab(tab, options = {}) {
   activeTab = tab;
 
   $$(".nav-btn").forEach((btn) => {
@@ -543,19 +825,42 @@ function setActiveTab(tab) {
   if (tab === "friends") {
     if (!friendsDirty) friendsDraft = cloneFriends(state.friends);
     renderFriendEditor();
-  } else if (friendsDirty) {
+  } else if (friendsDirty && isAdmin) {
     showFriendNote("Your friend edits are still local. Go back and tap Save changes.");
   }
 
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (tab === "spend") {
+    renderExpenseForm();
+    renderExpenseList();
+  }
+
+  if (tab === "orders") {
+    renderOrderForm();
+    renderOrderList();
+  }
+
+  if (!options.keepScroll) {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
-async function updateTrip(patch) {
+async function updateTrip(patch, options = {}) {
   if (!tripRef) return;
+  if (!options.allowWithoutAdmin && !isAdmin) {
+    toast("Admin only.");
+    throw new Error("Admin only");
+  }
+
   await updateDoc(tripRef, {
     ...patch,
     updatedAt: serverTimestamp()
   });
+}
+
+function requireAdmin() {
+  if (isAdmin) return true;
+  toast("Unlock admin mode first.");
+  return false;
 }
 
 function showFriendNote(message) {
@@ -574,7 +879,12 @@ function setStatus(text) {
 
 function toast(message) {
   setStatus(message);
-  setTimeout(() => setStatus("Live"), 1300);
+  setTimeout(() => setStatus("Live"), 1400);
+}
+
+function isActiveInside(selector) {
+  const root = $(selector);
+  return Boolean(root && document.activeElement && root.contains(document.activeElement));
 }
 
 function getTripCodeFromUrl() {
@@ -590,6 +900,10 @@ function cleanTripCode(value) {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 48);
+}
+
+function adminStorageKey() {
+  return `mussoorieAdmin:${currentTripCode}`;
 }
 
 function cloneFriends(friends) {
