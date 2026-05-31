@@ -1,8 +1,10 @@
-# Mussoorie Boys Trip — Premium Realtime Website
+# Mussoorie Boys Trip
 
-Root-only GitHub Pages website for a shared boys trip dashboard.
+A clean GitHub Pages-ready trip budget app.
 
 ## Files
+
+Keep all files in your repository root:
 
 ```txt
 index.html
@@ -12,41 +14,32 @@ README.md
 .nojekyll
 ```
 
-No folders, no build step, no npm install.
+## What is fixed in this version
 
-## What it does
+Friend names and budgets no longer sync on every typed letter.
 
-- Premium mobile-first trip dashboard
-- Realtime Firebase sync using one trip code
-- 7 friends by default
-- Add, remove and rename friends
-- Edit each friend's budget
-- Add expenses
-- Restaurant order board where friends add item names
-- Enter final restaurant total and see approx split
-- Export JSON backup
-- No bill photo upload
-- No Firebase Storage required
-- No “who pays whom” or settlement section
+Now it works like this:
 
-## Deploy on GitHub Pages
+1. Open Friends
+2. Change all names/budgets
+3. Tap **Save changes**
+4. Then it syncs to everyone
 
-1. Create a new GitHub repository.
-2. Upload these files directly in the main/root folder.
-3. Go to **Settings → Pages**.
-4. Choose branch **main** and folder **root**.
-5. Open the GitHub Pages link.
-6. Copy the friend link from the app and send it to your group.
+This prevents the mobile keyboard from closing while typing.
 
-## Firebase setup needed
+## Firebase setup
 
-Your Firebase config is already pasted inside `app.js`.
+This version uses **Cloud Firestore only**.
 
-You only need to enable **Cloud Firestore**:
+You do not need Firebase Storage. Bill photo upload is removed.
 
-Firebase Console → Build → Firestore Database → Create database.
+### Firestore Rules
 
-For quick testing, paste these open rules in **Firestore Database → Rules**:
+Go to:
+
+Firebase Console → Build → Firestore Database → Rules
+
+Paste:
 
 ```js
 rules_version = '2';
@@ -60,22 +53,20 @@ service cloud.firestore {
 }
 ```
 
-Click **Publish**.
+Then click **Publish**.
 
-## Important privacy note
+## Sharing
 
-The quick rules above make the trip editable by anyone with the link/trip code. This is easiest for friends, but do not use it for private or sensitive information.
+Upload these root files to GitHub Pages.
 
-## How friends join
+Open your website, copy the friend link, and share it. Everyone using the same trip code sees the same live data.
 
-Everyone should open the same URL with the same trip code, like:
+Example:
 
 ```txt
-https://yourusername.github.io/repo-name/?trip=mussorie-boys-trip
+https://yourname.github.io/repo-name/?trip=mussorie-boys-trip
 ```
 
-Any friend can also type the same trip code inside the app and tap **Join**.
+## Notes
 
-
-## Keyboard focus fix
-This version avoids rebuilding friend-name and budget input cards while someone is typing, so mobile keyboards stay open during edits.
+These rules are open for easy trip use. Anyone with the trip code can edit the trip.
