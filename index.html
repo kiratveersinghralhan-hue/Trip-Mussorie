@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#192437" />
+  <title>Mussoorie Boys Trip | Live Budget & Orders</title>
+  <meta name="description" content="Realtime boys trip budget, expense, friends, settlement, and restaurant order tracker for a Mussoorie trip." />
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <noscript>
+    <div class="noscript">This trip dashboard needs JavaScript enabled.</div>
+  </noscript>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">🏔️ Mussoorie Boys Trip</p>
+        <h1>Live Budget, Friends & Orders</h1>
+        <p class="subtitle">Track 7 friends, expenses, restaurant orders, and who owes whom — all from one GitHub Pages website.</p>
+      </div>
+      <div class="status-card" aria-live="polite">
+        <span id="syncDot" class="dot"></span>
+        <div>
+          <strong id="syncTitle">Starting sync…</strong>
+          <small id="syncDetail">Checking realtime mode</small>
+        </div>
+      </div>
+    </header>
+
+    <main id="app" class="app-grid" aria-live="polite"></main>
+  </div>
+
+  <template id="splitMemberTemplate">
+    <label class="chip checkbox-chip">
+      <input type="checkbox" checked />
+      <span></span>
+    </label>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
